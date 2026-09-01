@@ -1,0 +1,50 @@
+# Environment files (contain private keys / API secrets — never commit)
+.env
+.env.local
+**/.env
+!**/.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Expo / React Native
+app/.expo/
+app/dist/
+app/web-build/
+app/ios/
+app/android/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Firebase
+backend/functions/lib/
+backend/.firebase/
+backend/firebase-debug.log
+backend/firestore-debug.log
+backend/ui-debug.log
+backend/*.local
+
+# Firebase service account keys (never commit — full admin credential)
+*firebase-adminsdk*.json
+*service-account*.json
+
+# AWS Lambda build output (rebuild from source with `npm run package`)
+backend/lambda/dist/
+backend/lambda/deploy/
+
+# Build output (scoped — do NOT use a bare "lib/" here, it would also match
+# real source directories like app/src/lib/)
+dist/
+backend/lambda/dist/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
