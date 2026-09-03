@@ -48,3 +48,6 @@ backend/lambda/dist/
 # Editor
 .vscode/
 .idea/
+
+# Vercel local project link/env (not needed to reproduce the deploy)
+.vercel
