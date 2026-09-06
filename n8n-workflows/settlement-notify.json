@@ -1,0 +1,65 @@
+{
+  "name": "Streakr - Settlement Notify",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "streakr/settlement",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "1f1a5b1a-0000-4000-8000-000000000001",
+      "name": "Webhook: Settlement",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 0],
+      "webhookId": "streakr-settlement"
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body ?? $input.first().json;\n\nconst emoji = b.status === 'won' ? '✅' : b.status === 'lost' ? '❌' : '⚪️';\nconst dir = (b.direction || '').toUpperCase();\nconst streakLine = b.status === 'won'\n  ? `🔥 streak now *${b.currentStreak}* (best ${b.bestStreak})`\n  : b.status === 'lost'\n    ? `streak reset to 0 (best ${b.bestStreak})`\n    : `streak unaffected (*${b.currentStreak}*)`;\n\nconst badgeLine = (b.newBadges && b.newBadges.length)\n  ? `\\n🏅 New badge${b.newBadges.length > 1 ? 's' : ''}: ${b.newBadges.join(', ')}`\n  : '';\n\nconst payoutLine = (typeof b.payout === 'number' && b.payout > 0)\n  ? `\\n💰 payout: *${b.payout.toFixed(2)}* USDso`\n  : '';\n\nconst text = `${emoji} *${b.displayName}* called *${b.symbol} ${dir}* (${b.window}) — *${(b.status || '').toUpperCase()}*\\n${streakLine}${payoutLine}${badgeLine}\\n\\n[tx](https://shannon-explorer.somnia.network/tx/${b.txHash})`;\n\nreturn [{ json: { ...b, telegramText: text } }];\n"
+      },
+      "id": "1f1a5b1a-0000-4000-8000-000000000002",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [20, 0]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.telegramChatId || $env.STREAKR_DEFAULT_TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.telegramText }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "1f1a5b1a-0000-4000-8000-000000000003",
+      "name": "Telegram: Post to Room Chat",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [240, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "streakr-telegram-bot",
+          "name": "Streakr Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: Settlement": {
+      "main": [[{ "node": "Format Message", "type": "main", "index": 0 }]]
+    },
+    "Format Message": {
+      "main": [[{ "node": "Telegram: Post to Room Chat", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "notes": "Trigger: Cloud Function `notifySettlement` (backend/functions/src/n8n.ts) POSTs the SettlementNotifyPayload here on every call settlement. Set N8N_SETTLEMENT_WEBHOOK_URL in the Firebase Functions config/env to this webhook's production URL. `telegramChatId` should be resolved from Streakr's Room -> Telegram chat mapping upstream (e.g. a Firestore lookup node) if rooms map 1:1 to distinct Telegram groups; this version falls back to one shared demo chat via STREAKR_DEFAULT_TELEGRAM_CHAT_ID for the hackathon demo."
+}

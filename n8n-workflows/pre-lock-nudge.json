@@ -1,0 +1,99 @@
+{
+  "name": "Streakr - Pre-Lock Nudge",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 1 }]
+        }
+      },
+      "id": "2f2b6c2b-0000-4000-8000-000000000001",
+      "name": "Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-400, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.STREAKR_PRE_LOCK_NUDGE_URL }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "withinSeconds", "value": "120" }]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "x-streakr-secret", "value": "={{ $env.STREAKR_N8N_SHARED_SECRET }}" }]
+        },
+        "options": {}
+      },
+      "id": "2f2b6c2b-0000-4000-8000-000000000002",
+      "name": "GET preLockNudge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-180, 0]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "nudges",
+        "options": {}
+      },
+      "id": "2f2b6c2b-0000-4000-8000-000000000003",
+      "name": "Split Rooms",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [40, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const n = $json;\nconst mins = Math.round(n.secondsLeft / 60);\nconst text = `⏰ *${n.roomName}*: ${n.symbol} ${n.window} window locks in ~${mins < 1 ? '<1' : mins} min — get your call in!`;\nreturn [{ json: { ...n, telegramText: text } }];\n"
+      },
+      "id": "2f2b6c2b-0000-4000-8000-000000000004",
+      "name": "Format Nudge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.telegramChatId || $env.STREAKR_DEFAULT_TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.telegramText }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "2f2b6c2b-0000-4000-8000-000000000005",
+      "name": "Telegram: Nudge Room",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [480, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "streakr-telegram-bot",
+          "name": "Streakr Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Minute": {
+      "main": [[{ "node": "GET preLockNudge", "type": "main", "index": 0 }]]
+    },
+    "GET preLockNudge": {
+      "main": [[{ "node": "Split Rooms", "type": "main", "index": 0 }]]
+    },
+    "Split Rooms": {
+      "main": [[{ "node": "Format Nudge", "type": "main", "index": 0 }]]
+    },
+    "Format Nudge": {
+      "main": [[{ "node": "Telegram: Nudge Room", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "notes": "Polls the `preLockNudge` Cloud Function (backend/functions/src/nudge.ts) every minute, asking for rooms whose active market window closes within 120s. Set STREAKR_PRE_LOCK_NUDGE_URL to that function's HTTPS URL and STREAKR_N8N_SHARED_SECRET to match N8N_SHARED_SECRET in the Functions config. De-dupes naturally since a room only shows up in the 0-120s band once per window."
+}
