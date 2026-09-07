@@ -9,6 +9,7 @@ import {
   arrayUnion,
   setDoc,
   updateDoc,
+  deleteDoc,
   getDoc,
   getDocs,
   query,
@@ -47,6 +48,21 @@ export async function createRoom(params: {
 
 export async function joinRoom(roomId: string, uid: string): Promise<void> {
   await updateDoc(doc(db(), "rooms", roomId), { memberUids: arrayUnion(uid) });
+}
+
+/**
+ * Delete a room. Only the creator can do this — enforced by firestore.rules
+ * (`allow delete: if resource.data.createdBy == request.auth.uid`), so a
+ * non-creator's attempt fails server-side regardless of what the UI shows.
+ *
+ * Leaves `calls` alone on purpose: a settled call is an audit record tied to a
+ * real on-chain transaction, and shouldn't disappear because a room was
+ * tidied up. The room's leaderboard entries go, since they're derived.
+ */
+export async function deleteRoom(roomId: string): Promise<void> {
+  const entries = await getDocs(collection(db(), "leaderboard", roomId, "entries"));
+  await Promise.all(entries.docs.map((d) => deleteDoc(d.ref)));
+  await deleteDoc(doc(db(), "rooms", roomId));
 }
 
 export async function listPublicRooms(max = 30): Promise<RoomDoc[]> {

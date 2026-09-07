@@ -9,7 +9,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
 import { subscribeRoom, subscribeLeaderboard, setRoomActiveMarket } from "../lib/firestoreApi";
-import { listLiveMarkets, type LiveMarketInfo } from "../lib/eventContracts";
+import { listLiveMarkets, availableWindows, type LiveMarketInfo } from "../lib/eventContracts";
 import { fetchSentiment } from "../lib/sentimentApi";
 import type { LeaderboardEntryDoc, RoomDoc, Symbol_, WindowLength } from "../lib/types";
 import { Countdown } from "../components/Countdown";
@@ -17,6 +17,8 @@ import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
 import { Toggle } from "../components/ui/Toggle";
+import { PillButton } from "../components/ui/PillButton";
+import { Icon, type IconName } from "../components/ui/Icon";
 import { colors, radius, font, spacing, shadow } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Room">;
@@ -24,10 +26,6 @@ type Props = NativeStackScreenProps<RootStackParamList, "Room">;
 const SYMBOLS: { value: Symbol_; label: string }[] = [
   { value: "BTC", label: "₿ BTC" },
   { value: "ETH", label: "Ξ ETH" },
-];
-const WINDOWS: { value: WindowLength; label: string }[] = [
-  { value: "15m", label: "15m" },
-  { value: "1h", label: "1h" },
 ];
 const STAKES = [5, 10, 25, 50];
 
@@ -40,6 +38,7 @@ export default function RoomScreen({ route, navigation }: Props) {
   const [board, setBoard] = useState<LeaderboardEntryDoc[]>([]);
   const [symbol, setSymbol] = useState<Symbol_>("BTC");
   const [win, setWin] = useState<WindowLength>("1h");
+  const [allMarkets, setAllMarkets] = useState<LiveMarketInfo[]>([]);
   const [market, setMarket] = useState<LiveMarketInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -53,12 +52,24 @@ export default function RoomScreen({ route, navigation }: Props) {
     setLoading(true);
     setErr(null);
     try {
-      const found = (await listLiveMarkets()).find((m) => m.symbol === symbol && m.window === win) ?? null;
+      const live = await listLiveMarkets(symbol);
+      setAllMarkets(live);
+
+      // The venue rotates which cadences it runs, so the selected window may
+      // simply not exist right now. Fall back to one that does — and resolve
+      // the market in this same pass rather than returning early and waiting
+      // for a re-run, which would leave the card in a "no windows" state that
+      // contradicts the toggle showing live options.
+      const options = availableWindows(live, symbol);
+      const effective = options.includes(win) ? win : options[0];
+      if (effective && effective !== win) setWin(effective);
+
+      const found = effective ? (live.find((m) => m.window === effective) ?? null) : null;
       setMarket(found);
-      if (found && session) {
+      if (found && session && effective) {
         await setRoomActiveMarket(roomId, {
-          symbol, window: win,
-          positionMarketId: found.market.info.marketType === "BINARY" ? found.market.info.marketId : undefined,
+          symbol, window: effective,
+          positionMarketId: found.marketId,
         }).catch(() => {});
       }
     } catch (e) {
@@ -82,8 +93,9 @@ export default function RoomScreen({ route, navigation }: Props) {
     return () => { dead = true; };
   }, [symbol]);
 
+  const windowOptions = availableWindows(allMarkets, symbol).map((w) => ({ value: w, label: w }));
   const closed = !market || market.secondsLeft <= 0;
-  const totalSec = win === "15m" ? 900 : 3600;
+  const totalSec = market?.intervalSec && market.intervalSec > 0 ? market.intervalSec : 3600;
 
   const call = (direction: "up" | "down") => {
     if (!market || closed) {
@@ -100,7 +112,7 @@ export default function RoomScreen({ route, navigation }: Props) {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.head}>
           <Pressable onPress={() => navigation.goBack()} style={styles.back}>
-            <Text style={styles.backGlyph}>‹</Text>
+            <Icon name="back" size={20} color={colors.text} />
           </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={styles.headKicker}>Room</Text>
@@ -110,7 +122,9 @@ export default function RoomScreen({ route, navigation }: Props) {
 
         <View style={styles.pickers}>
           <Toggle options={SYMBOLS} value={symbol} onChange={setSymbol} compact />
-          <Toggle options={WINDOWS} value={win} onChange={setWin} compact />
+          {windowOptions.length > 0 ? (
+            <Toggle options={windowOptions} value={win} onChange={setWin} compact />
+          ) : null}
         </View>
 
         {/* Market card */}
@@ -118,21 +132,36 @@ export default function RoomScreen({ route, navigation }: Props) {
           <Card padded={20} elevated style={styles.market}>
             <LinearGradient colors={["rgba(197,248,42,0.07)", "transparent"]} style={StyleSheet.absoluteFill} />
             {loading && !market ? (
-              <ActivityIndicator color={colors.accent} style={{ paddingVertical: spacing(11) }} />
+              <View style={styles.loadingWrap}>
+                <ActivityIndicator color={colors.accent} />
+                <Text style={styles.loadingText}>Reading live {symbol} markets on-chain…</Text>
+              </View>
             ) : err ? (
-              <Text style={styles.err}>{err}</Text>
+              <View style={styles.noMarket}>
+                <Text style={styles.err}>{err}</Text>
+                <PillButton
+                  label="Retry"
+                  tone="ink"
+                  size="sm"
+                  onPress={loadMarket}
+                  style={{ marginTop: spacing(3) }}
+                />
+              </View>
             ) : !market ? (
               <View style={styles.noMarket}>
-                <Text style={styles.noMarketGlyph}>🌙</Text>
-                <Text style={styles.noMarketTitle}>No live {symbol} {win} window</Text>
-                <Text style={styles.noMarketBody}>The venue isn't running this series right now — try the other window.</Text>
+                <Icon name="moon" size={30} color={colors.textFaint} style={{ marginBottom: 8 }} />
+                <Text style={styles.noMarketTitle}>No live {symbol} windows</Text>
+                <Text style={styles.noMarketBody}>
+                  The venue rotates which series it runs and isn't quoting {symbol} right now. Try the
+                  other asset, or check back shortly.
+                </Text>
               </View>
             ) : (
               <View style={styles.marketRow}>
                 <View style={{ flex: 1 }}>
-                  <Chip label={closed ? "Locked" : "Live"} tone={closed ? "neutral" : "up"} icon="●" />
+                  <Chip label={closed ? "Locked" : "Live"} tone={closed ? "neutral" : "up"} icon="live" />
                   <Text style={styles.marketSym}>{symbol}</Text>
-                  <Text style={styles.marketId} numberOfLines={1}>{market.market.symbol}</Text>
+                  <Text style={styles.marketId} numberOfLines={1}>{market.label}</Text>
                   <View style={styles.book}>
                     <View>
                       <Text style={styles.bookL}>Up</Text>
@@ -158,7 +187,7 @@ export default function RoomScreen({ route, navigation }: Props) {
           <Animated.View entering={FadeInDown.delay(90).duration(320)}>
             <Card tone="raised" padded={16} style={styles.ai}>
               <View style={styles.aiHead}>
-                <Text style={styles.aiGlyph}>🤖</Text>
+                <Icon name="sparkle" size={13} color={colors.accent} />
                 <Text style={styles.aiLabel}>AI take · not advice</Text>
               </View>
               <Text style={styles.aiText}>{sentiment.text}</Text>
@@ -185,8 +214,8 @@ export default function RoomScreen({ route, navigation }: Props) {
 
         {/* Call buttons */}
         <View style={styles.calls}>
-          <CallBtn label="UP" arrow="▲" grad={colors.gradAccent} ink={colors.upInk} glow={colors.accentGlow} disabled={closed} onPress={() => call("up")} />
-          <CallBtn label="DOWN" arrow="▼" grad={colors.gradDown} ink="#fff" glow={colors.downGlow} disabled={closed} onPress={() => call("down")} />
+          <CallBtn label="UP" arrow="up" grad={colors.gradAccent} ink={colors.upInk} glow={colors.accentGlow} disabled={closed} onPress={() => call("up")} />
+          <CallBtn label="DOWN" arrow="down" grad={colors.gradDown} ink="#fff" glow={colors.downGlow} disabled={closed} onPress={() => call("down")} />
         </View>
         {closed && market ? <Text style={styles.closedNote}>Waiting for the venue to roll the next window…</Text> : null}
 
@@ -205,7 +234,7 @@ export default function RoomScreen({ route, navigation }: Props) {
                   <Text style={[styles.rankT, i < 3 && styles.rankTT]}>{i + 1}</Text>
                 </View>
                 <Text style={styles.bname} numberOfLines={1}>{e.displayName}</Text>
-                <Text style={styles.bstreak}>🔥{e.currentStreak}</Text>
+                <View style={styles.bstreakWrap}><Icon name="streak" size={12} color={colors.gold} /><Text style={styles.bstreak}>{e.currentStreak}</Text></View>
                 <Text style={styles.bxp}>{e.xp} XP</Text>
               </View>
             ))
@@ -219,7 +248,7 @@ export default function RoomScreen({ route, navigation }: Props) {
 function CallBtn({
   label, arrow, grad, ink, glow, disabled, onPress,
 }: {
-  label: string; arrow: string; grad: readonly [string, string];
+  label: string; arrow: IconName; grad: readonly [string, string];
   ink: string; glow: string; disabled: boolean; onPress: () => void;
 }) {
   const s = useSharedValue(1);
@@ -237,7 +266,7 @@ function CallBtn({
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         style={styles.callBtn}
       >
-        <Text style={[styles.callArrow, { color: disabled ? colors.textFaint : ink }]}>{arrow}</Text>
+        <Icon name={arrow} size={24} color={disabled ? colors.textFaint : ink} />
         <Text style={[styles.callLabel, { color: disabled ? colors.textFaint : ink }]}>{label}</Text>
       </LinearGradient>
     </AnimatedPressable>
@@ -251,7 +280,6 @@ const styles = StyleSheet.create({
     width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.surface,
     borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
-  backGlyph: { color: colors.text, fontSize: 22, marginTop: -3 },
   headKicker: { ...font.label, color: colors.textFaint, textTransform: "uppercase" },
   headTitle: { ...font.h2, color: colors.text, marginTop: 1 },
 
@@ -265,15 +293,15 @@ const styles = StyleSheet.create({
   bookL: { ...font.label, color: colors.textFaint, textTransform: "uppercase" },
   bookV: { ...font.mono, fontSize: 17, color: colors.text, marginTop: 2 },
   bookSep: { width: 1, height: 28, backgroundColor: colors.border },
+  loadingWrap: { alignItems: "center", gap: spacing(3), paddingVertical: spacing(9) },
+  loadingText: { ...font.bodySm, color: colors.textFaint },
   err: { color: colors.down, textAlign: "center", lineHeight: 20 },
   noMarket: { alignItems: "center", paddingVertical: spacing(4) },
-  noMarketGlyph: { fontSize: 30, marginBottom: spacing(2) },
   noMarketTitle: { ...font.h3, color: colors.text },
   noMarketBody: { ...font.bodySm, color: colors.textFaint, marginTop: 4, textAlign: "center", lineHeight: 18 },
 
   ai: { marginBottom: spacing(4) },
   aiHead: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing(1.5) },
-  aiGlyph: { fontSize: 13 },
   aiLabel: { ...font.label, color: colors.textFaint, textTransform: "uppercase" },
   aiText: { ...font.body, color: colors.text, lineHeight: 21 },
 
@@ -290,7 +318,6 @@ const styles = StyleSheet.create({
   calls: { flexDirection: "row", gap: spacing(3), marginBottom: spacing(2) },
   callWrap: { flex: 1, borderRadius: radius.xl },
   callBtn: { borderRadius: radius.xl, paddingVertical: spacing(6), alignItems: "center", gap: 3 },
-  callArrow: { fontSize: 20 },
   callLabel: { fontWeight: "900", fontSize: 19, letterSpacing: 0.6 },
   closedNote: { ...font.bodySm, color: colors.textFaint, textAlign: "center", marginBottom: spacing(2) },
 
@@ -311,6 +338,7 @@ const styles = StyleSheet.create({
   rankT: { ...font.label, color: colors.textFaint },
   rankTT: { color: colors.accent },
   bname: { flex: 1, color: colors.text, fontWeight: "700", fontSize: 14 },
+  bstreakWrap: { flexDirection: "row", alignItems: "center", gap: 3 },
   bstreak: { color: colors.gold, fontWeight: "800", fontSize: 13 },
   bxp: { ...font.mono, fontSize: 12, color: colors.textFaint, minWidth: 52, textAlign: "right" },
 });

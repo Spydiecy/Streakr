@@ -10,7 +10,8 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
 import { useWallet } from "../lib/WalletProvider";
-import { createRoom, joinRoom, listPublicRooms } from "../lib/firestoreApi";
+import { createRoom, joinRoom, listPublicRooms, deleteRoom } from "../lib/firestoreApi";
+import { prewarmMarkets } from "../lib/eventContracts";
 import type { RoomDoc } from "../lib/types";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
@@ -19,12 +20,23 @@ import { Chip } from "../components/ui/Chip";
 import { PillButton } from "../components/ui/PillButton";
 import { IconTile } from "../components/ui/IconTile";
 import { Toggle } from "../components/ui/Toggle";
+import { Icon } from "../components/ui/Icon";
+import { useResponsive } from "../lib/useResponsive";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 
 type Props = NativeStackScreenProps<RootStackParamList, "RoomList">;
+
+/** A display name the user never set falls back to a shortened wallet address.
+ *  Rendered at full heading weight that looks like a bug, so address-like names
+ *  get tabular figures and a smaller size instead. */
+function isAddressLike(name?: string | null): boolean {
+  return !!name && /^0x[0-9a-fA-F]{2,}…/.test(name);
+}
 
 export default function RoomListScreen({ navigation }: Props) {
   const { profile, session } = useSession();
   const wallet = useWallet();
+  const { isWide } = useResponsive();
   const [rooms, setRooms] = useState<RoomDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,6 +44,8 @@ export default function RoomListScreen({ navigation }: Props) {
   const [roomName, setRoomName] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [creating, setCreating] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<RoomDoc | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -44,11 +58,27 @@ export default function RoomListScreen({ navigation }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Start the (slow, ~20s cold) market-registry load now, so the Room screen
+  // usually opens against a warm cache instead of a spinner.
+  useEffect(() => { prewarmMarkets(); }, []);
+
   const join = async (room: RoomDoc) => {
     if (!session) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (!room.memberUids.includes(session.user.uid)) await joinRoom(room.roomId, session.user.uid);
     navigation.navigate("Room", { roomId: room.roomId });
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await deleteRoom(pendingDelete.roomId);
+      setRooms((prev) => prev.filter((r) => r.roomId !== pendingDelete.roomId));
+      setPendingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const create = async () => {
@@ -74,26 +104,31 @@ export default function RoomListScreen({ navigation }: Props) {
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.kicker}>Welcome back</Text>
-          <Text style={styles.name} numberOfLines={1}>{profile?.displayName ?? "…"}</Text>
+          <Text
+            style={[styles.name, isAddressLike(profile?.displayName) && styles.nameAddr]}
+            numberOfLines={1}
+          >
+            {profile?.displayName ?? "…"}
+          </Text>
         </View>
         <Pressable
           onPress={() => { Haptics.selectionAsync(); navigation.navigate("GlobalLeaderboard"); }}
           style={styles.iconBtn}
         >
-          <Text style={styles.iconBtnGlyph}>🏆</Text>
+          <Icon name="trophy" size={19} color={colors.textMuted} />
         </Pressable>
         <Pressable
           onPress={() => { Haptics.selectionAsync(); navigation.navigate("Profile"); }}
           style={styles.iconBtn}
         >
-          <Text style={styles.iconBtnGlyph}>👤</Text>
+          <Icon name="profile" size={19} color={colors.textMuted} />
         </Pressable>
       </View>
 
       <FlatList
         data={rooms}
         keyExtractor={(r) => r.roomId}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, isWide && styles.listWide]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -112,7 +147,7 @@ export default function RoomListScreen({ navigation }: Props) {
                     <Text style={styles.heroKicker}>Current streak</Text>
                     <View style={styles.heroValueRow}>
                       <Text style={styles.heroValue}>{profile?.currentStreak ?? 0}</Text>
-                      <Text style={styles.heroFlame}>🔥</Text>
+                      <Icon name="streak" size={26} color={colors.accentDeep} />
                     </View>
                   </View>
                   <View style={styles.heroStats}>
@@ -137,7 +172,7 @@ export default function RoomListScreen({ navigation }: Props) {
                     <Chip
                       label={wallet.label}
                       tone={wallet.kind === "embedded" ? "onPaper" : "coral"}
-                      icon="◈"
+                      icon="wallet"
                     />
                     <Text style={styles.walletAddr}>
                       {wallet.address ? `${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}` : ""}
@@ -153,12 +188,19 @@ export default function RoomListScreen({ navigation }: Props) {
             </View>
           </>
         }
+        ListFooterComponent={
+          isWide ? (
+            <Animated.View entering={FadeIn.delay(160)} style={{ marginTop: spacing(4) }}>
+              <PillButton label="New Room" icon="add" onPress={() => setOpen(true)} size="lg" full />
+            </Animated.View>
+          ) : null
+        }
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator color={colors.accent} style={{ marginTop: spacing(8) }} />
           ) : (
             <Card style={styles.empty}>
-              <Text style={styles.emptyGlyph}>🎯</Text>
+              <IconTile icon="target" tone="ink" size={46} style={{ marginBottom: 10 }} />
               <Text style={styles.emptyTitle}>No rooms yet</Text>
               <Text style={styles.emptyBody}>Create the first one and invite your friends.</Text>
             </Card>
@@ -169,7 +211,7 @@ export default function RoomListScreen({ navigation }: Props) {
             <Pressable onPress={() => join(item)}>
               {({ pressed }) => (
                 <Card style={[styles.roomCard, pressed && styles.pressed]} padded={14}>
-                  <IconTile glyph={item.name.charAt(0).toUpperCase()} tone={index % 2 ? "gold" : "accent"} size={46} />
+                  <IconTile letter={item.name.charAt(0).toUpperCase()} tone={index % 2 ? "gold" : "accent"} size={46} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.roomName} numberOfLines={1}>{item.name}</Text>
                     <View style={styles.roomMeta}>
@@ -177,10 +219,24 @@ export default function RoomListScreen({ navigation }: Props) {
                         {item.memberUids.length} member{item.memberUids.length === 1 ? "" : "s"}
                       </Text>
                       {item.activeMarket ? (
-                        <Chip label={`${item.activeMarket.symbol} ${item.activeMarket.window}`} tone="accent" />
+                        <Chip label={`${item.activeMarket.symbol} ${item.activeMarket.window}`} tone="accent" icon="live" />
                       ) : null}
                     </View>
                   </View>
+                  {session && item.createdBy === session.user.uid ? (
+                    <Pressable
+                      onPress={(e) => {
+                        // Don't let the tap fall through and open the room.
+                        e.stopPropagation?.();
+                        Haptics.selectionAsync();
+                        setPendingDelete(item);
+                      }}
+                      hitSlop={8}
+                      style={styles.trash}
+                    >
+                      <Icon name="close" size={15} color={colors.textFaint} />
+                    </Pressable>
+                  ) : null}
                   <Text style={styles.chev}>›</Text>
                 </Card>
               )}
@@ -189,10 +245,14 @@ export default function RoomListScreen({ navigation }: Props) {
         )}
       />
 
-      {/* Floating CTA */}
-      <Animated.View entering={FadeIn.delay(160)} style={styles.fab}>
-        <PillButton label="New Room" icon="＋" onPress={() => setOpen(true)} size="lg" full />
-      </Animated.View>
+      {/* Pinned CTA on phones; on wide screens it renders inline as the list
+          footer instead, so it sits with the content rather than stranded at
+          the bottom of a tall viewport. */}
+      {!isWide ? (
+        <Animated.View entering={FadeIn.delay(160)} style={styles.fab}>
+          <PillButton label="New Room" icon="add" onPress={() => setOpen(true)} size="lg" full />
+        </Animated.View>
+      ) : null}
 
       {/* Create sheet */}
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
@@ -211,8 +271,8 @@ export default function RoomListScreen({ navigation }: Props) {
             <Text style={styles.sheetLabel}>Visibility</Text>
             <Toggle
               options={[
-                { value: "public", label: "🌐  Public" },
-                { value: "private", label: "🔒  Private" },
+                { value: "public", label: "Public" },
+                { value: "private", label: "Private" },
               ]}
               value={visibility}
               onChange={setVisibility}
@@ -232,6 +292,16 @@ export default function RoomListScreen({ navigation }: Props) {
           </View>
         </BlurView>
       </Modal>
+
+      <ConfirmDialog
+        visible={!!pendingDelete}
+        title={`Delete "${pendingDelete?.name ?? ""}"?`}
+        body="The room and its leaderboard are removed. Settled calls are kept — they're records of real on-chain transactions."
+        confirmLabel={deleting ? "Deleting…" : "Delete room"}
+        destructive
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </Screen>
   );
 }
@@ -243,29 +313,29 @@ const styles = StyleSheet.create({
   },
   kicker: { ...font.bodySm, color: colors.textFaint },
   name: { ...font.h1, fontSize: 25, color: colors.text, marginTop: 1 },
+  nameAddr: { fontSize: 19, letterSpacing: -0.2, fontVariant: ["tabular-nums"] },
   iconBtn: {
     width: 44, height: 44, borderRadius: radius.md,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
     alignItems: "center", justifyContent: "center",
   },
-  iconBtnGlyph: { fontSize: 18 },
 
   list: { paddingHorizontal: spacing(5), paddingBottom: spacing(26), gap: spacing(2.5) },
+  listWide: { paddingBottom: spacing(10) },
 
   heroCard: { marginBottom: spacing(6) },
   heroTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   heroKicker: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
   heroValueRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
   heroValue: { fontSize: 52, fontWeight: "900", color: colors.paperInk, letterSpacing: -2 },
-  heroFlame: { fontSize: 26 },
-  heroStats: { flexDirection: "row", alignItems: "center", gap: spacing(2.5), marginTop: spacing(2) },
+  heroStats: { flexDirection: "row", alignItems: "center", gap: spacing(2.5), marginTop: spacing(1) },
   heroStat: { alignItems: "center" },
   heroStatV: { fontSize: 17, fontWeight: "900", color: colors.paperInk },
   heroStatL: { fontSize: 10, fontWeight: "700", color: colors.paperMuted, textTransform: "uppercase", marginTop: 1 },
   heroDivider: { width: 1, height: 22, backgroundColor: "rgba(10,11,12,0.12)" },
   walletRow: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    marginTop: spacing(4), paddingTop: spacing(3.5),
+    marginTop: spacing(3), paddingTop: spacing(3),
     borderTopWidth: 1, borderTopColor: "rgba(10,11,12,0.08)",
   },
   walletAddr: { ...font.mono, fontSize: 12, color: colors.paperMuted },
@@ -282,10 +352,13 @@ const styles = StyleSheet.create({
   roomName: { ...font.h3, fontSize: 15.5, color: colors.text },
   roomMeta: { flexDirection: "row", alignItems: "center", gap: spacing(2), marginTop: 3 },
   roomMembers: { ...font.bodySm, fontSize: 12, color: colors.textFaint },
+  trash: {
+    width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
+  },
   chev: { color: colors.textFaint, fontSize: 24, fontWeight: "300" },
 
   empty: { alignItems: "center", paddingVertical: spacing(9) },
-  emptyGlyph: { fontSize: 34, marginBottom: spacing(2) },
   emptyTitle: { ...font.h3, color: colors.text },
   emptyBody: { ...font.bodySm, color: colors.textFaint, marginTop: 4, textAlign: "center" },
 

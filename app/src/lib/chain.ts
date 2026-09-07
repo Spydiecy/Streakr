@@ -92,16 +92,28 @@ export function makeChain(): Chain {
   });
 }
 
-/** Read-only exchange — no signer. Safe to construct before wallet unlock. */
+let _readOnly: SomniaMarkets | undefined;
+
+/**
+ * Read-only exchange — no signer. Safe to construct before wallet unlock.
+ *
+ * Cached as a module singleton. Constructing a SomniaMarkets opens its own
+ * websocket and its market registry is per-instance, so building a fresh one
+ * on every poll meant re-downloading the whole registry every 15 seconds —
+ * measured at ~20s to resolve one market card. Reusing the instance lets the
+ * SDK's own caching and live-tail do their job.
+ */
 export function createReadOnlyExchange(): SomniaMarkets {
+  if (_readOnly) return _readOnly;
   const ep = ENDPOINTS[NETWORK];
-  return new SomniaMarkets({
+  _readOnly = new SomniaMarkets({
     indexerUrl: ep.indexer,
     chain: makeChain(),
     wsRpcUrl: ep.ws,
     addresses: deployment().addresses as any,
     priceFeed: NETWORK === "testnet" ? SOMNIA_TESTNET_PRICE_FEED : undefined,
   });
+  return _readOnly;
 }
 
 /** Signing exchange, bound to the user's embedded wallet private key. */

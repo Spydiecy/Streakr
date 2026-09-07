@@ -8,7 +8,18 @@
 export type CallStatus = "pending" | "won" | "lost" | "void";
 export type Direction = "up" | "down";
 export type Symbol_ = "BTC" | "ETH";
-export type WindowLength = "15m" | "1h";
+
+/**
+ * Window cadences Streakr can label.
+ *
+ * Deliberately wider than the 15m/1h the product concept describes: the venue
+ * decides which series are live at any moment and rotates them. Measured on
+ * Shannon testnet — at one point the venue ran 1h + 4h + 1d, and a few hours
+ * later only 4h + 1d with no 1h at all. Hard-coding 15m/1h made the app look
+ * broken whenever neither happened to be running, so the UI now offers
+ * whichever cadences are actually live (see eventContracts.listLiveMarkets).
+ */
+export type WindowLength = "15m" | "1h" | "4h" | "1d" | "1w";
 
 export interface UserDoc {
   uid: string;

@@ -1,14 +1,35 @@
 {
+  "//": "Composite indexes, each matching an actual query in the app or the settlement Lambda. Firestore rejects a query at runtime if its exact (filter, order) shape isn't indexed, so these are kept 1:1 with the call sites named below.",
   "indexes": [
     {
+      "//": "app/src/lib/firestoreApi.ts subscribeRoomCalls — where(roomId ==) + orderBy(createdAt desc)",
       "collectionGroup": "calls",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "settledAt", "order": "DESCENDING" }
+        { "fieldPath": "roomId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
     {
+      "//": "app/src/lib/firestoreApi.ts subscribeUserCalls — where(uid ==) + orderBy(createdAt desc)",
+      "collectionGroup": "calls",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "backend/lambda pollPendingCalls 'first call ever' check — where(uid ==) + where(status in [...])",
+      "collectionGroup": "calls",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Kept for settlement-ordered history views (calls by room/user, newest settled first).",
       "collectionGroup": "calls",
       "queryScope": "COLLECTION",
       "fields": [
@@ -20,25 +41,26 @@
       "collectionGroup": "calls",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "settledAt", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "calls",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "window", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
-      ]
-    },
-    {
+      "//": "app/src/lib/firestoreApi.ts listPublicRooms — where(isPublic ==) + orderBy(createdAt desc)",
       "collectionGroup": "rooms",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "isPublic", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "app/src/lib/firestoreApi.ts subscribeLeaderboard — leaderboard/{scope}/entries ranked by streak then XP. Subcollection, so the index is on the 'entries' collection group.",
+      "collectionGroup": "entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "currentStreak", "order": "DESCENDING" },
+        { "fieldPath": "xp", "order": "DESCENDING" }
       ]
     }
   ],

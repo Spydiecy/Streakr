@@ -44,9 +44,17 @@ export function Countdown({
   const circumference = 2 * Math.PI * radius;
   const dashoffset = useMemo(() => circumference * (1 - progress), [circumference, progress]);
 
-  const m = Math.floor(secondsLeft / 60);
-  const s = secondsLeft % 60;
   const ringColor = closed ? colors.textFaint : urgent ? colors.down : colors.accent;
+
+  // Scale the format to the magnitude. The venue runs cadences from 15m up to
+  // a day, and a bare m:ss reads as nonsense past an hour ("795:23" for a 1d
+  // window), so hours get their own unit.
+  const hrs = Math.floor(secondsLeft / 3600);
+  const mins = Math.floor((secondsLeft % 3600) / 60);
+  const secs = secondsLeft % 60;
+  const big = hrs >= 1 ? `${hrs}h` : `${mins}`;
+  const small = hrs >= 1 ? `${mins.toString().padStart(2, "0")}m` : `${secs.toString().padStart(2, "0")}`;
+  const separator = hrs >= 1 ? " " : ":";
 
   return (
     <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
@@ -77,8 +85,13 @@ export function Countdown({
         <Text style={styles.closedText}>CLOSED</Text>
       ) : (
         <>
-          <Text style={[styles.time, urgent && styles.timeUrgent]}>
-            {m}:{s.toString().padStart(2, "0")}
+          <Text
+            style={[styles.time, urgent && styles.timeUrgent, hrs >= 10 && styles.timeCompact]}
+            numberOfLines={1}
+          >
+            {big}
+            {separator}
+            {small}
           </Text>
           <Text style={styles.caption}>left</Text>
         </>
@@ -96,6 +109,9 @@ const styles = StyleSheet.create({
   },
   timeUrgent: {
     color: colors.down,
+  },
+  timeCompact: {
+    fontSize: 22,
   },
   caption: {
     ...font.label,

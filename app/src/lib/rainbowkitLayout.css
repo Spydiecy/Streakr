@@ -1,0 +1,22 @@
+/*
+ * Layout fix for RainbowKit inside react-native-web.
+ *
+ * RainbowKitProvider wraps its children in a `<div data-rk>` element (it uses
+ * that attribute to scope its CSS custom properties). That div is a plain
+ * block-level element with `height: auto`.
+ *
+ * react-native-web builds layout from an unbroken chain of flex containers —
+ * SafeAreaProvider, NavigationContainer and every RN `flex: 1` view all
+ * measure against their parent's height. Dropping a non-flex, auto-height div
+ * into the middle of that chain collapses everything below it to `height: 0`.
+ * The DOM and text are all still present, so it fails silently: no console
+ * error, just an invisible app.
+ *
+ * Making the wrapper a full-height flex container restores the chain.
+ */
+[data-rk] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-height: 0;
+}

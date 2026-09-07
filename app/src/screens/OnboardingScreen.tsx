@@ -12,13 +12,14 @@ import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
 import { PillButton } from "../components/ui/PillButton";
 import { IconTile } from "../components/ui/IconTile";
+import { Icon } from "../components/ui/Icon";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Onboarding">;
 
 const PERKS = [
-  { glyph: "⚡", tone: "accent" as const, title: "Real on-chain calls", body: "Signed on DreamDEX, settled automatically" },
-  { glyph: "🔥", tone: "gold" as const, title: "Streaks & badges", body: "Build a run, climb the room board" },
-  { glyph: "🛡", tone: "ink" as const, title: "Capped downside", body: "Never lose more than your stake" },
+  { icon: "bolt" as const, tone: "accent" as const, title: "Real on-chain calls", body: "Signed on DreamDEX, settled automatically" },
+  { icon: "streak" as const, tone: "gold" as const, title: "Streaks & badges", body: "Build a run, climb the room board" },
+  { icon: "shield" as const, tone: "ink" as const, title: "Capped downside", body: "Never lose more than your stake" },
 ];
 
 export default function OnboardingScreen({ navigation }: Props) {
@@ -42,23 +43,22 @@ export default function OnboardingScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen glow="none">
-      <LinearGradient colors={colors.gradHero} style={styles.hero} />
+    <Screen glow="none" hero>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Animated.View entering={FadeInDown.duration(500).springify()} style={styles.brandBlock}>
             <LinearGradient colors={colors.gradAccent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.mark}>
-              <Text style={styles.markGlyph}>🔥</Text>
+              <Icon name="streak" size={34} color={colors.onAccent} />
             </LinearGradient>
             <Text style={styles.wordmark}>Streakr</Text>
             <Text style={styles.tagline}>Call it. Own the streak.</Text>
-            <Chip label="Somnia Testnet" tone="accent" icon="●" style={{ marginTop: spacing(3) }} />
+            <Chip label="Somnia Testnet" tone="accent" icon="live" align="center" style={{ marginTop: spacing(3) }} />
           </Animated.View>
 
           <Animated.View entering={FadeIn.delay(180).duration(450)} style={styles.perks}>
             {PERKS.map((p) => (
               <View key={p.title} style={styles.perkRow}>
-                <IconTile glyph={p.glyph} tone={p.tone} size={40} />
+                <IconTile icon={p.icon} tone={p.tone} size={40} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.perkTitle}>{p.title}</Text>
                   <Text style={styles.perkBody}>{p.body}</Text>
@@ -84,7 +84,7 @@ export default function OnboardingScreen({ navigation }: Props) {
 
               <PillButton
                 label={wallet.supportsExternal ? "Connect Wallet" : "Create Device Wallet"}
-                icon="◈"
+                icon="wallet"
                 onPress={handleConnect}
                 loading={wallet.connecting}
                 size="lg"
@@ -124,7 +124,6 @@ export default function OnboardingScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  hero: { position: "absolute", top: 0, left: 0, right: 0, height: 460 },
   scroll: { flexGrow: 1, justifyContent: "center", padding: spacing(6), paddingBottom: spacing(10) },
   brandBlock: { alignItems: "center", marginBottom: spacing(9) },
   mark: {

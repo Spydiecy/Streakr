@@ -15,14 +15,15 @@ import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
 import { PillButton } from "../components/ui/PillButton";
+import { Icon, type IconName } from "../components/ui/Icon";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Result">;
 
-const META: Record<string, { glyph: string; label: string; tint: string; grad: readonly [string, string]; ink: string }> = {
-  pending: { glyph: "◷", label: "SETTLING", tint: colors.textMuted, grad: ["#26282d", "#1c1e22"], ink: colors.text },
-  won:     { glyph: "🎉", label: "YOU WON", tint: colors.accent, grad: colors.gradAccent, ink: colors.upInk },
-  lost:    { glyph: "💥", label: "NOT THIS TIME", tint: colors.down, grad: colors.gradDown, ink: "#fff" },
-  void:    { glyph: "⚪️", label: "VOIDED", tint: colors.neutral, grad: ["#5b636f", "#434a54"], ink: "#fff" },
+const META: Record<string, { glyph: IconName; label: string; tint: string; grad: readonly [string, string]; ink: string }> = {
+  pending: { glyph: "clock", label: "SETTLING", tint: colors.textMuted, grad: ["#26282d", "#1c1e22"], ink: colors.text },
+  won:     { glyph: "trophy", label: "YOU WON", tint: colors.accent, grad: colors.gradAccent, ink: colors.upInk },
+  lost:    { glyph: "down", label: "NOT THIS TIME", tint: colors.down, grad: colors.gradDown, ink: "#fff" },
+  void:    { glyph: "shield", label: "VOIDED", tint: colors.neutral, grad: ["#5b636f", "#434a54"], ink: "#fff" },
 };
 
 const cardUrl = () => process.env.EXPO_PUBLIC_RESULT_CARD_URL;
@@ -64,8 +65,8 @@ export default function ResultScreen({ route, navigation }: Props) {
     try {
       await Share.share({
         message:
-          `${m.glyph} Called ${call?.symbol} ${call?.direction?.toUpperCase()} on Streakr — ${m.label}!` +
-          ` 🔥 streak: ${call?.streakAfter ?? "?"}${url ? `\n${url}` : ""}`,
+          `Called ${call?.symbol} ${call?.direction?.toUpperCase()} on Streakr — ${m.label}!` +
+          ` · streak ${call?.streakAfter ?? "?"}${url ? `\n${url}` : ""}`,
         url: url ?? undefined,
       });
     } catch (e) {
@@ -82,7 +83,7 @@ export default function ResultScreen({ route, navigation }: Props) {
           <>
             <Animated.View style={pulseStyle} entering={ZoomIn.duration(460).springify()}>
               <LinearGradient colors={m.grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.disc}>
-                <Text style={[styles.discGlyph, { color: m.ink }]}>{m.glyph}</Text>
+                <Icon name={m.glyph} size={46} color={m.ink} />
               </LinearGradient>
             </Animated.View>
 
@@ -105,7 +106,7 @@ export default function ResultScreen({ route, navigation }: Props) {
                   <Text style={styles.streakK}>Current streak</Text>
                   <View style={styles.streakRow}>
                     <Text style={styles.streakV}>{call.streakAfter ?? 0}</Text>
-                    <Text style={styles.streakF}>🔥</Text>
+                    <Icon name="streak" size={28} color={colors.accentDeep} />
                   </View>
 
                   <View style={styles.pills}>
@@ -117,14 +118,14 @@ export default function ResultScreen({ route, navigation }: Props) {
 
                   {call.badgesAwarded?.length ? (
                     <View style={styles.badge}>
-                      <Text style={styles.badgeT}>🏅 New badge · {call.badgesAwarded.join(", ")}</Text>
+                      <View style={styles.badgeRow}><Icon name="medal" size={13} color={colors.accentDeep} /><Text style={styles.badgeT}>New badge · {call.badgesAwarded.join(", ")}</Text></View>
                     </View>
                   ) : null}
                 </Card>
 
                 <PillButton
                   label="Share Result Card"
-                  icon="↗"
+                  icon="share"
                   onPress={share}
                   size="lg"
                   full
@@ -162,7 +163,6 @@ function Stat({ label, value, tint }: { label: string; value: string; tint: stri
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing(6), gap: spacing(2) },
   disc: { width: 104, height: 104, borderRadius: 52, alignItems: "center", justifyContent: "center", marginBottom: spacing(3) },
-  discGlyph: { fontSize: 46 },
   status: { fontSize: 25, fontWeight: "900", letterSpacing: 0.4 },
   detail: { ...font.body, color: colors.textMuted, marginTop: 1 },
   pendWrap: { marginTop: spacing(4), maxWidth: 290 },
@@ -171,7 +171,6 @@ const styles = StyleSheet.create({
   streakK: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
   streakRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
   streakV: { fontSize: 58, fontWeight: "900", color: colors.paperInk, letterSpacing: -2.5 },
-  streakF: { fontSize: 28 },
   pills: { flexDirection: "row", gap: spacing(3), marginTop: spacing(4) },
   stat: {
     backgroundColor: "rgba(10,11,12,0.05)", borderRadius: radius.md,
@@ -183,6 +182,7 @@ const styles = StyleSheet.create({
     marginTop: spacing(4), backgroundColor: colors.accentSoft,
     paddingHorizontal: spacing(3.5), paddingVertical: spacing(2), borderRadius: radius.pill,
   },
+  badgeRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   badgeT: { fontSize: 12.5, fontWeight: "800", color: colors.accentDeep },
 
   txWrap: { marginTop: spacing(5) },

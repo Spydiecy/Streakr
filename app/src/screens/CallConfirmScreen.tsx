@@ -14,6 +14,7 @@ import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
 import { PillButton } from "../components/ui/PillButton";
+import { Icon } from "../components/ui/Icon";
 
 type Props = NativeStackScreenProps<RootStackParamList, "CallConfirm">;
 
@@ -79,12 +80,12 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
     <Screen glow={isUp ? "accent" : "down"} edges={["top", "left", "right", "bottom"]}>
       <View style={styles.root}>
         <Pressable onPress={() => navigation.goBack()} style={styles.close}>
-          <Text style={styles.closeGlyph}>✕</Text>
+          <Icon name="close" size={17} color={colors.textMuted} />
         </Pressable>
 
         <Animated.View entering={FadeInUp.duration(420).springify()} style={styles.hero}>
           <LinearGradient colors={grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dirTile}>
-            <Text style={[styles.dirArrow, { color: ink }]}>{isUp ? "▲" : "▼"}</Text>
+            <Icon name={isUp ? "up" : "down"} size={40} color={ink} />
           </LinearGradient>
           <Text style={styles.dirText}>
             {symbol} <Text style={{ color: accent }}>{direction.toUpperCase()}</Text>
@@ -100,7 +101,7 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
             <Row label="If you're wrong" value={`−${stakeUsdso.toFixed(2)} tUSDC`} />
 
             <View style={styles.risk}>
-              <Text style={styles.riskGlyph}>🛡</Text>
+              <Icon name="shield" size={16} color={colors.accentDeep} />
               <Text style={styles.riskText}>
                 <Text style={styles.riskBold}>Capped risk, no liquidation.</Text> Your downside is exactly
                 your stake — the Event Contract can't take more than that.
@@ -129,7 +130,7 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
               {err ? <Text style={styles.err}>{err}</Text> : null}
               <PillButton
                 label="Sign & Submit Call"
-                icon="◈"
+                icon="wallet"
                 onPress={confirm}
                 loading={busy}
                 size="lg"
@@ -162,13 +163,11 @@ const styles = StyleSheet.create({
     width: 38, height: 38, borderRadius: radius.md, backgroundColor: colors.surface,
     borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
-  closeGlyph: { color: colors.textMuted, fontSize: 15 },
   hero: { alignItems: "center", marginTop: spacing(3) },
   dirTile: {
     width: 84, height: 84, borderRadius: radius.lg,
     alignItems: "center", justifyContent: "center", marginBottom: spacing(4),
   },
-  dirArrow: { fontSize: 36 },
   dirText: { ...font.h1, fontSize: 29, color: colors.text },
 
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing(3) },
@@ -181,7 +180,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(10,11,12,0.05)", borderRadius: radius.md,
     padding: spacing(3.5), marginTop: spacing(2),
   },
-  riskGlyph: { fontSize: 16 },
   riskText: { ...font.bodySm, color: colors.paperMuted, flex: 1, lineHeight: 18.5 },
   riskBold: { color: colors.paperInk, fontWeight: "800" },
 

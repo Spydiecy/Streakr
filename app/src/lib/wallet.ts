@@ -1,59 +1,48 @@
-// Embedded wallet for Streakr.
+// The embedded ("demo") wallet.
 //
-// The brief allows "WalletConnect OR embedded wallet pattern consistent with
-// how DreamDEX's own web app onboards users." DreamDEX's own bot-kit
-// onboarding is itself just a raw private key in .env (see
-// chain-integration/.env.example + docs/getting-started.md) — there's no
-// WalletConnect flow documented anywhere in the bot-kit or the Event
-// Contracts docs to mirror. Standing up a real WalletConnect (Reown) pairing
-// flow needs a registered Project ID from cloud.reown.com, which nobody has
-// provided here — so this app uses an embedded wallet instead: a private key
-// generated on-device, stored in the OS keychain via expo-secure-store, never
-// leaving the device. Every call the user makes is still a real signed
-// transaction, submitted the same way the CLI scripts (place-event-contract-call.ts)
-// sign theirs — same SDK, same trader.placeOrder path. If a real WalletConnect
-// integration is wanted later, swap this module's signer for a WalletConnect
-// session signer; nothing else in the app needs to change since everything
-// downstream just wants a `0x${string}` private key or a viem WalletClient.
+// A private key generated on-device and persisted locally. Storage is
+// platform-split — OS keychain on native, localStorage on web — see
+// keyStore.ts / keyStore.web.ts, including the security note on the web path.
 //
-// Security note: SecureStore uses the iOS Keychain / Android Keystore, which
-// is reasonable for a hackathon demo wallet holding testnet funds. It is NOT
-// a substitute for a hardware-backed or MPC wallet for real funds.
+// This is the fallback wallet. On web the primary path is RainbowKit, where
+// the key stays inside the user's own wallet and this module isn't used. The
+// embedded wallet exists so the full call cycle is demoable on Somnia testnet
+// without asking someone to fund an external wallet first.
+//
+// Either way, every call is a real wallet-signed testnet transaction through
+// the same markets-sdk trader — the difference is only custody of the key.
 
 import "react-native-get-random-values";
-import * as SecureStore from "expo-secure-store";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { readKey, writeKey, clearKey, IS_SECURE_STORAGE } from "./keyStore";
 
-const KEY_STORAGE_KEY = "streakr.wallet.privateKey";
+export { IS_SECURE_STORAGE };
 
 export interface StreakrWallet {
   privateKey: `0x${string}`;
   address: `0x${string}`;
 }
 
-/**
- * Load the existing embedded wallet, or create one on first launch. Called
- * once during onboarding; the resulting address is what gets written to
- * users/{uid}.walletAddress.
- */
-export async function loadOrCreateWallet(): Promise<StreakrWallet> {
-  const existing = await SecureStore.getItemAsync(KEY_STORAGE_KEY);
-  if (existing) {
-    const privateKey = existing as `0x${string}`;
-    return { privateKey, address: privateKeyToAccount(privateKey).address };
-  }
-  const privateKey = generatePrivateKey();
-  await SecureStore.setItemAsync(KEY_STORAGE_KEY, privateKey, {
-    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-  });
+function toWallet(privateKey: `0x${string}`): StreakrWallet {
   return { privateKey, address: privateKeyToAccount(privateKey).address };
 }
 
-export async function hasWallet(): Promise<boolean> {
-  return (await SecureStore.getItemAsync(KEY_STORAGE_KEY)) != null;
+/** Load the existing embedded wallet, or create one on first use. */
+export async function loadOrCreateWallet(): Promise<StreakrWallet> {
+  const existing = await readKey();
+  if (existing && /^0x[0-9a-fA-F]{64}$/.test(existing)) {
+    return toWallet(existing as `0x${string}`);
+  }
+  const privateKey = generatePrivateKey();
+  await writeKey(privateKey);
+  return toWallet(privateKey);
 }
 
-/** Danger: wipes the local embedded wallet. Used only from a debug/reset action. */
+export async function hasWallet(): Promise<boolean> {
+  return (await readKey()) != null;
+}
+
+/** Wipes the local embedded wallet. */
 export async function deleteWallet(): Promise<void> {
-  await SecureStore.deleteItemAsync(KEY_STORAGE_KEY);
+  await clearKey();
 }

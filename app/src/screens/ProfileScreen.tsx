@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -15,6 +15,9 @@ import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
 import { Chip } from "../components/ui/Chip";
 import { PillButton } from "../components/ui/PillButton";
+import { Icon, type IconName } from "../components/ui/Icon";
+import { BADGE_ICONS } from "../lib/badgeIcons";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Profile">;
 
@@ -23,6 +26,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const wallet = useWallet();
   const [calls, setCalls] = useState<CallDoc[]>([]);
   const [copied, setCopied] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!session) return;
@@ -41,25 +45,17 @@ export default function ProfileScreen({ navigation }: Props) {
   const wins = settled.filter((c) => c.status === "won").length;
   const rate = settled.length ? Math.round((wins / settled.length) * 100) : 0;
 
-  const disconnect = () => {
-    Alert.alert("Disconnect wallet?", "You can reconnect any time.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Disconnect",
-        style: "destructive",
-        onPress: async () => {
-          await wallet.disconnect();
-          navigation.reset({ index: 0, routes: [{ name: "Onboarding" }] });
-        },
-      },
-    ]);
+  const doDisconnect = async () => {
+    setConfirmOpen(false);
+    await wallet.disconnect();
+    navigation.reset({ index: 0, routes: [{ name: "Onboarding" }] });
   };
 
   return (
     <Screen edges={["top", "left", "right"]}>
       <View style={styles.head}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
-          <Text style={styles.backGlyph}>‹</Text>
+          <Icon name="back" size={20} color={colors.text} />
         </Pressable>
         <Text style={styles.headTitle}>Profile</Text>
         <View style={{ width: 40 }} />
@@ -70,10 +66,16 @@ export default function ProfileScreen({ navigation }: Props) {
         <Animated.View entering={FadeInDown.duration(400)}>
           <Card tone="paper" padded={20} elevated style={{ alignItems: "center" }}>
             <LinearGradient colors={colors.gradAccent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.avatar}>
-              <Text style={styles.avatarT}>{(profile?.displayName ?? "?").charAt(0).toUpperCase()}</Text>
+              {/* An unset display name falls back to the wallet address, whose first
+                  character is a meaningless "0" — show an icon instead. */}
+              {/^0x/.test(profile?.displayName ?? "") ? (
+                <Icon name="profile" size={34} color={colors.onAccent} />
+              ) : (
+                <Text style={styles.avatarT}>{(profile?.displayName ?? "?").charAt(0).toUpperCase()}</Text>
+              )}
             </LinearGradient>
             <Text style={styles.name}>{profile?.displayName ?? "…"}</Text>
-            {wallet.label ? <Chip label={wallet.label} tone="onPaper" icon="◈" style={{ marginTop: spacing(2) }} /> : null}
+            {wallet.label ? <Chip label={wallet.label} tone="onPaper" icon="wallet" style={{ marginTop: spacing(2) }} /> : null}
             <Pressable onPress={copy} style={styles.addrWrap}>
               <Text style={styles.addr}>
                 {wallet.address ? `${wallet.address.slice(0, 10)}…${wallet.address.slice(-8)}` : "—"}
@@ -82,13 +84,13 @@ export default function ProfileScreen({ navigation }: Props) {
             </Pressable>
 
             <View style={styles.stats}>
-              <Stat v={profile?.currentStreak ?? 0} l="Streak" glyph="🔥" />
+              <Stat v={profile?.currentStreak ?? 0} l="Streak" icon="streak" />
               <View style={styles.sep} />
-              <Stat v={profile?.bestStreak ?? 0} l="Best" glyph="🏆" />
+              <Stat v={profile?.bestStreak ?? 0} l="Best" icon="trophy" />
               <View style={styles.sep} />
-              <Stat v={profile?.xp ?? 0} l="XP" glyph="⭐" />
+              <Stat v={profile?.xp ?? 0} l="XP" icon="star" />
               <View style={styles.sep} />
-              <Stat v={`${rate}%`} l="Win rate" glyph="🎯" />
+              <Stat v={`${rate}%`} l="Win rate" icon="target" />
             </View>
           </Card>
         </Animated.View>
@@ -106,7 +108,7 @@ export default function ProfileScreen({ navigation }: Props) {
                   padded={12}
                   style={[styles.badge, !got && styles.badgeOff]}
                 >
-                  <Text style={[styles.badgeGlyph, !got && { opacity: 0.45 }]}>{meta.icon}</Text>
+                  <Icon name={BADGE_ICONS[k]} size={22} color={got ? colors.accentDeep : colors.textFaint} />
                   <Text style={[styles.badgeL, got ? styles.badgeLOn : styles.badgeLOff]} numberOfLines={2}>
                     {meta.label}
                   </Text>
@@ -124,9 +126,11 @@ export default function ProfileScreen({ navigation }: Props) {
           ) : (
             calls.map((c, i) => (
               <View key={c.callId} style={[styles.hrow, i > 0 && styles.hline]}>
-                <Text style={[styles.harrow, { color: c.direction === "up" ? colors.accent : colors.down }]}>
-                  {c.direction === "up" ? "▲" : "▼"}
-                </Text>
+                <Icon
+                  name={c.direction === "up" ? "up" : "down"}
+                  size={16}
+                  color={c.direction === "up" ? colors.accent : colors.down}
+                />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.hsym}>{c.symbol}</Text>
                   <Text style={styles.hwin}>{c.window} · {c.stakeUsdso.toFixed(2)} tUSDC</Text>
@@ -140,16 +144,26 @@ export default function ProfileScreen({ navigation }: Props) {
           )}
         </Card>
 
-        <PillButton label="Disconnect wallet" tone="ink" onPress={disconnect} full style={{ marginTop: spacing(7) }} />
+        <PillButton label="Disconnect wallet" tone="ink" onPress={() => setConfirmOpen(true)} full style={{ marginTop: spacing(7) }} />
       </ScrollView>
+
+      <ConfirmDialog
+        visible={confirmOpen}
+        title="Disconnect wallet?"
+        body="You can reconnect any time. The demo wallet's local key is cleared."
+        confirmLabel="Disconnect"
+        destructive
+        onConfirm={doDisconnect}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </Screen>
   );
 }
 
-function Stat({ v, l, glyph }: { v: number | string; l: string; glyph: string }) {
+function Stat({ v, l, icon }: { v: number | string; l: string; icon: IconName }) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statGlyph}>{glyph}</Text>
+      <Icon name={icon} size={15} color={colors.paperMuted} style={{ marginBottom: 3 }} />
       <Text style={styles.statV}>{v}</Text>
       <Text style={styles.statL}>{l}</Text>
     </View>
@@ -162,7 +176,6 @@ const styles = StyleSheet.create({
     width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.surface,
     borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
-  backGlyph: { color: colors.text, fontSize: 22, marginTop: -3 },
   headTitle: { ...font.h3, color: colors.text, flex: 1, textAlign: "center" },
   scroll: { paddingHorizontal: spacing(5), paddingBottom: spacing(12) },
 
@@ -179,7 +192,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: "rgba(10,11,12,0.08)", alignSelf: "stretch",
   },
   stat: { alignItems: "center", flex: 1 },
-  statGlyph: { fontSize: 15, marginBottom: 3 },
   statV: { fontSize: 18, fontWeight: "900", color: colors.paperInk },
   statL: { fontSize: 9.5, fontWeight: "800", color: colors.paperMuted, textTransform: "uppercase", marginTop: 1 },
   sep: { width: 1, height: 30, backgroundColor: "rgba(10,11,12,0.1)" },
@@ -189,7 +201,6 @@ const styles = StyleSheet.create({
   gridItem: { width: "31%" },
   badge: { alignItems: "center" },
   badgeOff: { opacity: 0.5 },
-  badgeGlyph: { fontSize: 24 },
   badgeL: { fontSize: 10, textAlign: "center", marginTop: 6, fontWeight: "800" },
   badgeLOn: { color: colors.accentDeep },
   badgeLOff: { color: colors.textFaint },
@@ -197,7 +208,6 @@ const styles = StyleSheet.create({
   empty: { ...font.bodySm, color: colors.textFaint, textAlign: "center", paddingVertical: spacing(7) },
   hrow: { flexDirection: "row", alignItems: "center", gap: spacing(3), padding: spacing(4) },
   hline: { borderTopWidth: 1, borderTopColor: colors.border },
-  harrow: { fontSize: 15, fontWeight: "900" },
   hsym: { color: colors.text, fontWeight: "800", fontSize: 14 },
   hwin: { ...font.bodySm, fontSize: 11.5, color: colors.textFaint, marginTop: 1 },
 });

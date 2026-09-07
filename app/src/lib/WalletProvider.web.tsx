@@ -9,6 +9,9 @@
 // real path; embedded is the labelled demo path.
 
 import "@rainbow-me/rainbowkit/styles.css";
+// Must come after RainbowKit's own stylesheet — see the file for why the
+// [data-rk] wrapper needs explicit flex sizing under react-native-web.
+import "./rainbowkitLayout.css";
 import React, { createContext, useContext, useMemo, useState, useCallback } from "react";
 import { WagmiProvider, createConfig, http, useAccount, useConnect, useDisconnect, useWalletClient } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -26,7 +29,7 @@ import {
   coinbaseWallet,
 } from "@rainbow-me/rainbowkit/wallets";
 import { activeChain, WALLETCONNECT_PROJECT_ID, hasWalletConnectProjectId, WALLET_APP_NAME } from "./wagmi";
-import { loadOrCreateWallet } from "./wallet";
+import { loadOrCreateWallet, deleteWallet } from "./wallet";
 import type { CallSigner, WalletState } from "./walletTypes";
 import { colors } from "../theme";
 
@@ -74,7 +77,11 @@ function InnerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const disconnect = useCallback(async () => {
+    // Clear the stored demo key too, not just the in-memory handle — otherwise
+    // "disconnect" then "use demo wallet" silently returns the same address,
+    // which doesn't match what the button says it does.
     setEmbedded(null);
+    await deleteWallet().catch(() => {});
     if (isConnected) await disconnectAsync();
   }, [isConnected, disconnectAsync]);
 

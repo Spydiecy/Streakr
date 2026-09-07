@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { colors, radius, shadow } from "../../theme";
+import { Icon, type IconName } from "./Icon";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -14,7 +15,7 @@ interface Props {
   onPress: () => void;
   tone?: PillTone;
   size?: "sm" | "md" | "lg";
-  icon?: string;
+  icon?: IconName;
   disabled?: boolean;
   loading?: boolean;
   full?: boolean;
@@ -69,7 +70,13 @@ export function PillButton({
           <ActivityIndicator color={disabled ? colors.textFaint : t.ink} size="small" />
         ) : (
           <View style={styles.row}>
-            {icon ? <Text style={[styles.icon, sizeIcon[size], { color: disabled ? colors.textFaint : t.ink }]}>{icon}</Text> : null}
+            {icon ? (
+              <Icon
+                name={icon}
+                size={size === "lg" ? 19 : size === "md" ? 17 : 15}
+                color={disabled ? colors.textFaint : t.ink}
+              />
+            ) : null}
             <Text style={[styles.label, sizeLabel[size], { color: disabled ? colors.textFaint : t.ink }]}>{label}</Text>
           </View>
         )}

@@ -9,6 +9,8 @@ import type { LeaderboardEntryDoc } from "../lib/types";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
+import { Icon } from "../components/ui/Icon";
+import { IconTile } from "../components/ui/IconTile";
 
 type Props = NativeStackScreenProps<RootStackParamList, "GlobalLeaderboard">;
 
@@ -29,7 +31,7 @@ export default function GlobalLeaderboardScreen({ navigation }: Props) {
     <Screen edges={["top", "left", "right"]}>
       <View style={styles.head}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
-          <Text style={styles.backGlyph}>‹</Text>
+          <Icon name="back" size={20} color={colors.text} />
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={styles.kicker}>Global</Text>
@@ -39,7 +41,7 @@ export default function GlobalLeaderboardScreen({ navigation }: Props) {
 
       {rows.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyGlyph}>🏆</Text>
+          <IconTile icon="trophy" tone="ink" size={52} style={{ marginBottom: 12 }} />
           <Text style={styles.emptyTitle}>Nothing settled yet</Text>
           <Text style={styles.emptyBody}>Be the first to land a call.</Text>
         </View>
@@ -65,7 +67,7 @@ export default function GlobalLeaderboardScreen({ navigation }: Props) {
                       </LinearGradient>
                     </View>
                     <Text style={styles.spotName} numberOfLines={1}>{e.displayName}</Text>
-                    <Text style={styles.spotStreak}>🔥{e.currentStreak}</Text>
+                    <View style={styles.spotStreakWrap}><Icon name="streak" size={11} color={colors.gold} /><Text style={styles.spotStreak}>{e.currentStreak}</Text></View>
                     <LinearGradient colors={p.grad} style={[styles.bar, { height: p.h }]}>
                       <Text style={[styles.barN, { color: p.ink }]}>{place + 1}</Text>
                     </LinearGradient>
@@ -80,7 +82,7 @@ export default function GlobalLeaderboardScreen({ navigation }: Props) {
                 <View style={styles.rowInner}>
                   <Text style={styles.rank}>{index + 4}</Text>
                   <Text style={styles.name} numberOfLines={1}>{item.displayName}</Text>
-                  <Text style={styles.streak}>🔥{item.currentStreak}</Text>
+                  <View style={styles.streakWrap}><Icon name="streak" size={12} color={colors.gold} /><Text style={styles.streak}>{item.currentStreak}</Text></View>
                   <Text style={styles.xp}>{item.xp} XP</Text>
                 </View>
               </Card>
@@ -98,12 +100,10 @@ const styles = StyleSheet.create({
     width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.surface,
     borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
-  backGlyph: { color: colors.text, fontSize: 22, marginTop: -3 },
   kicker: { ...font.label, color: colors.textFaint, textTransform: "uppercase" },
   title: { ...font.h2, color: colors.text, marginTop: 1 },
 
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing(1) },
-  emptyGlyph: { fontSize: 38, marginBottom: spacing(2) },
   emptyTitle: { ...font.h3, color: colors.text },
   emptyBody: { ...font.bodySm, color: colors.textFaint },
 
@@ -114,7 +114,8 @@ const styles = StyleSheet.create({
   spotAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
   spotAvatarT: { fontWeight: "900", fontSize: 17 },
   spotName: { color: colors.text, fontSize: 11.5, fontWeight: "800", maxWidth: 80 },
-  spotStreak: { color: colors.gold, fontSize: 11.5, fontWeight: "800", marginTop: 2, marginBottom: spacing(2) },
+  spotStreakWrap: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2, marginBottom: spacing(2) },
+  spotStreak: { color: colors.gold, fontSize: 11.5, fontWeight: "800" },
   bar: {
     width: "100%", borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md,
     alignItems: "center", paddingTop: spacing(2),
@@ -125,6 +126,7 @@ const styles = StyleSheet.create({
   rowInner: { flexDirection: "row", alignItems: "center", padding: spacing(3.5), gap: spacing(2.5) },
   rank: { ...font.label, color: colors.textFaint, width: 24, fontSize: 12 },
   name: { flex: 1, color: colors.text, fontWeight: "700", fontSize: 14 },
+  streakWrap: { flexDirection: "row", alignItems: "center", gap: 3 },
   streak: { color: colors.gold, fontWeight: "800", fontSize: 13 },
   xp: { ...font.mono, fontSize: 12, color: colors.textFaint, minWidth: 52, textAlign: "right" },
 });
