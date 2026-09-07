@@ -39,14 +39,14 @@ export function Countdown({
   const urgent = secondsLeft <= 30 && secondsLeft > 0;
   const closed = secondsLeft <= 0;
 
-  const strokeWidth = 8;
+  const strokeWidth = 9;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const dashoffset = useMemo(() => circumference * (1 - progress), [circumference, progress]);
 
   const m = Math.floor(secondsLeft / 60);
   const s = secondsLeft % 60;
-  const ringColor = closed ? colors.textFaint : urgent ? colors.down : colors.primary;
+  const ringColor = closed ? colors.textFaint : urgent ? colors.down : colors.accent;
 
   return (
     <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
@@ -98,12 +98,12 @@ const styles = StyleSheet.create({
     color: colors.down,
   },
   caption: {
-    ...font.caption,
+    ...font.label,
     color: colors.textFaint,
     marginTop: 2,
   },
   closedText: {
-    ...font.caption,
+    ...font.label,
     color: colors.textFaint,
     fontSize: 13,
   },

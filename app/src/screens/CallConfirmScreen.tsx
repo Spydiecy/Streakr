@@ -6,97 +6,112 @@ import Animated, { FadeInUp, FadeIn } from "react-native-reanimated";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
+import { useWallet } from "../lib/WalletProvider";
 import { findMarket, placeCall, type LiveMarketInfo } from "../lib/eventContracts";
 import { recordCall } from "../lib/firestoreApi";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
-import { GradientButton } from "../components/ui/GradientButton";
+import { Chip } from "../components/ui/Chip";
+import { PillButton } from "../components/ui/PillButton";
 
 type Props = NativeStackScreenProps<RootStackParamList, "CallConfirm">;
 
 export default function CallConfirmScreen({ route, navigation }: Props) {
-  const { roomId, symbol, window: windowLen, direction, stakeUsdso } = route.params;
+  const { roomId, symbol, window: win, direction, stakeUsdso } = route.params;
   const { session } = useSession();
+  const wallet = useWallet();
   const [market, setMarket] = useState<LiveMarketInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const isUp = direction === "up";
-  const accentGradient = isUp ? colors.gradientUp : colors.gradientDown;
-  const accentColor = isUp ? colors.up : colors.down;
+  const grad = isUp ? colors.gradAccent : colors.gradDown;
+  const accent = isUp ? colors.accent : colors.down;
+  const ink = isUp ? colors.upInk : "#fff";
 
   useEffect(() => {
-    findMarket(symbol, windowLen)
+    findMarket(symbol, win)
       .then(setMarket)
-      .catch((e) => setError((e as Error).message))
+      .catch((e) => setErr((e as Error).message))
       .finally(() => setLoading(false));
-  }, [symbol, windowLen]);
+  }, [symbol, win]);
 
-  const potentialPayout = market?.yesAsk
-    ? stakeUsdso / (direction === "up" ? market.yesAsk : 1 - (market.yesBid ?? market.yesAsk))
-    : null;
+  // Price of the leg being bought, in its own probability terms.
+  const entry = market
+    ? isUp
+      ? market.yesAsk
+      : market.yesBid !== undefined
+        ? 1 - market.yesBid
+        : undefined
+    : undefined;
+  const payout = entry ? stakeUsdso / entry : null;
 
-  const handleConfirm = async () => {
+  const confirm = async () => {
     if (!market || !session) return;
-    setSubmitting(true);
-    setError(null);
+    setBusy(true);
+    setErr(null);
     try {
-      const result = await placeCall(session.wallet.privateKey, market, direction, stakeUsdso);
+      const signer = await wallet.getSigner();
+      const res = await placeCall(signer, market, direction, stakeUsdso);
       const callId = await recordCall({
         roomId,
         uid: session.user.uid,
-        symbol,
-        direction,
-        window: windowLen,
-        stakeUsdso: result.stakeSpent,
-        txHash: result.txHash,
-        positionId: result.positionId,
+        symbol, direction, window: win,
+        stakeUsdso: res.stakeSpent,
+        txHash: res.txHash,
+        positionId: res.positionId,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       navigation.replace("Result", { callId, roomId });
     } catch (e) {
-      const message = (e as Error).message;
-      setError(message);
+      const m = (e as Error).message;
+      setErr(m);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Call failed", message);
+      Alert.alert("Call failed", m);
     } finally {
-      setSubmitting(false);
+      setBusy(false);
     }
   };
 
   return (
-    <Screen glow="none" edges={["top", "left", "right", "bottom"]}>
-      <View style={styles.container}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.closeButton}>
-          <Text style={styles.closeIcon}>✕</Text>
+    <Screen glow={isUp ? "accent" : "down"} edges={["top", "left", "right", "bottom"]}>
+      <View style={styles.root}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.close}>
+          <Text style={styles.closeGlyph}>✕</Text>
         </Pressable>
 
-        <Animated.View entering={FadeInUp.duration(400).springify()} style={styles.center}>
-          <LinearGradient colors={accentGradient} style={styles.directionBadge}>
-            <Text style={styles.directionArrow}>{isUp ? "▲" : "▼"}</Text>
+        <Animated.View entering={FadeInUp.duration(420).springify()} style={styles.hero}>
+          <LinearGradient colors={grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dirTile}>
+            <Text style={[styles.dirArrow, { color: ink }]}>{isUp ? "▲" : "▼"}</Text>
           </LinearGradient>
-          <Text style={styles.symbolText}>
-            {symbol} {direction.toUpperCase()}
+          <Text style={styles.dirText}>
+            {symbol} <Text style={{ color: accent }}>{direction.toUpperCase()}</Text>
           </Text>
-          <Text style={styles.windowText}>{windowLen} window</Text>
+          <Chip label={`${win} window`} tone="neutral" style={{ marginTop: spacing(2) }} />
         </Animated.View>
 
-        <Animated.View entering={FadeIn.delay(150).duration(350)}>
-          <Card style={styles.detailsCard}>
+        <Animated.View entering={FadeIn.delay(140).duration(340)}>
+          <Card tone="paper" padded={20} elevated>
             <Row label="Stake" value={`${stakeUsdso.toFixed(2)} tUSDC`} />
-            <Row
-              label="Potential payout"
-              value={potentialPayout ? `~${potentialPayout.toFixed(2)} tUSDC` : "—"}
-              valueColor={colors.up}
-            />
-            <View style={styles.divider} />
-            <View style={styles.riskRow}>
-              <Text style={styles.riskIcon}>🛡️</Text>
+            <Row label="Entry price" value={entry ? entry.toFixed(3) : "—"} />
+            <Row label="If you're right" value={payout ? `≈ ${payout.toFixed(2)} tUSDC` : "—"} strong />
+            <Row label="If you're wrong" value={`−${stakeUsdso.toFixed(2)} tUSDC`} />
+
+            <View style={styles.risk}>
+              <Text style={styles.riskGlyph}>🛡</Text>
               <Text style={styles.riskText}>
-                Capped risk, no liquidation. Right, and you get a fixed payout. Wrong, and you only lose
-                your stake — nothing more.
+                <Text style={styles.riskBold}>Capped risk, no liquidation.</Text> Your downside is exactly
+                your stake — the Event Contract can't take more than that.
+              </Text>
+            </View>
+
+            <View style={styles.signedBy}>
+              <Text style={styles.signedByL}>Signing with</Text>
+              <Text style={styles.signedByV}>
+                {wallet.label ?? "—"}
+                {wallet.address ? `  ·  ${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}` : ""}
               </Text>
             </View>
           </Card>
@@ -104,26 +119,27 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
 
         <View style={styles.footer}>
           {loading ? (
-            <ActivityIndicator color={colors.primary} />
+            <ActivityIndicator color={colors.accent} />
           ) : !market ? (
-            <Text style={styles.errorText}>
-              {error ?? `No live ${symbol} ${windowLen} window right now — go back and pick another.`}
+            <Text style={styles.err}>
+              {err ?? `No live ${symbol} ${win} window right now — go back and pick another.`}
             </Text>
           ) : (
             <>
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
-              <GradientButton
+              {err ? <Text style={styles.err}>{err}</Text> : null}
+              <PillButton
                 label="Sign & Submit Call"
-                onPress={handleConfirm}
-                loading={submitting}
+                icon="◈"
+                onPress={confirm}
+                loading={busy}
                 size="lg"
-                colors={accentGradient}
-                glow={isUp ? colors.upGlow : colors.downGlow}
+                full
+                tone={isUp ? "accent" : "down"}
               />
             </>
           )}
-          <Pressable onPress={() => navigation.goBack()} style={styles.cancelButton}>
-            <Text style={styles.cancelText}>Cancel</Text>
+          <Pressable onPress={() => navigation.goBack()} style={styles.cancel}>
+            <Text style={styles.cancelT}>Cancel</Text>
           </Pressable>
         </View>
       </View>
@@ -131,50 +147,54 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
   );
 }
 
-function Row({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
     <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={[styles.rowValue, valueColor && { color: valueColor }]}>{value}</Text>
+      <Text style={styles.rowL}>{label}</Text>
+      <Text style={[styles.rowV, strong && styles.rowVStrong]}>{value}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: spacing(5), justifyContent: "space-between" },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
+  root: { flex: 1, padding: spacing(5), justifyContent: "space-between" },
+  close: {
+    width: 38, height: 38, borderRadius: radius.md, backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
-  closeIcon: { color: colors.textMuted, fontSize: 16 },
-  center: { alignItems: "center", marginTop: spacing(4) },
-  directionBadge: {
-    width: 88,
-    height: 88,
-    borderRadius: radius.xl,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing(4),
+  closeGlyph: { color: colors.textMuted, fontSize: 15 },
+  hero: { alignItems: "center", marginTop: spacing(3) },
+  dirTile: {
+    width: 84, height: 84, borderRadius: radius.lg,
+    alignItems: "center", justifyContent: "center", marginBottom: spacing(4),
   },
-  directionArrow: { fontSize: 40, color: "#04140a" },
-  symbolText: { ...font.h1, fontSize: 30, color: colors.text },
-  windowText: { ...font.body, color: colors.textFaint, marginTop: 4 },
-  detailsCard: { marginTop: spacing(8) },
-  row: { flexDirection: "row", justifyContent: "space-between", marginBottom: spacing(3) },
-  rowLabel: { ...font.body, color: colors.textFaint },
-  rowValue: { ...font.h3, fontSize: 16, color: colors.text },
-  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing(2) },
-  riskRow: { flexDirection: "row", gap: spacing(3), alignItems: "flex-start" },
-  riskIcon: { fontSize: 18 },
-  riskText: { ...font.bodySm, color: colors.textMuted, flex: 1, lineHeight: 19 },
+  dirArrow: { fontSize: 36 },
+  dirText: { ...font.h1, fontSize: 29, color: colors.text },
+
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing(3) },
+  rowL: { ...font.body, color: colors.paperMuted },
+  rowV: { ...font.mono, fontSize: 15, color: colors.paperInk },
+  rowVStrong: { fontSize: 17, fontWeight: "900" },
+
+  risk: {
+    flexDirection: "row", gap: spacing(3), alignItems: "flex-start",
+    backgroundColor: "rgba(10,11,12,0.05)", borderRadius: radius.md,
+    padding: spacing(3.5), marginTop: spacing(2),
+  },
+  riskGlyph: { fontSize: 16 },
+  riskText: { ...font.bodySm, color: colors.paperMuted, flex: 1, lineHeight: 18.5 },
+  riskBold: { color: colors.paperInk, fontWeight: "800" },
+
+  signedBy: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    marginTop: spacing(4), paddingTop: spacing(3.5),
+    borderTopWidth: 1, borderTopColor: "rgba(10,11,12,0.08)",
+  },
+  signedByL: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
+  signedByV: { ...font.bodySm, fontSize: 12, color: colors.paperInk, fontWeight: "700" },
+
   footer: { gap: spacing(3) },
-  errorText: { color: colors.down, fontSize: 13, textAlign: "center" },
-  cancelButton: { alignItems: "center", paddingVertical: spacing(2) },
-  cancelText: { color: colors.textFaint, fontWeight: "600" },
+  err: { color: colors.down, fontSize: 12.5, textAlign: "center", lineHeight: 18 },
+  cancel: { alignItems: "center", paddingVertical: spacing(2) },
+  cancelT: { ...font.body, color: colors.textFaint, fontWeight: "700" },
 });

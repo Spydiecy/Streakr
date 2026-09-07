@@ -1,73 +1,68 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
-  View,
-  Text,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Modal,
-  TextInput,
-  ActivityIndicator,
-  RefreshControl,
+  View, Text, FlatList, Pressable, StyleSheet, Modal, TextInput,
+  ActivityIndicator, RefreshControl,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
+import { useWallet } from "../lib/WalletProvider";
 import { createRoom, joinRoom, listPublicRooms } from "../lib/firestoreApi";
 import type { RoomDoc } from "../lib/types";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
-import { Badge } from "../components/ui/Badge";
-import { GradientButton } from "../components/ui/GradientButton";
+import { Chip } from "../components/ui/Chip";
+import { PillButton } from "../components/ui/PillButton";
+import { IconTile } from "../components/ui/IconTile";
+import { Toggle } from "../components/ui/Toggle";
 
 type Props = NativeStackScreenProps<RootStackParamList, "RoomList">;
 
 export default function RoomListScreen({ navigation }: Props) {
   const { profile, session } = useSession();
+  const wallet = useWallet();
   const [rooms, setRooms] = useState<RoomDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [newRoomName, setNewRoomName] = useState("");
-  const [isPublic, setIsPublic] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [roomName, setRoomName] = useState("");
+  const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const r = await listPublicRooms();
-      setRooms(r);
+      setRooms(await listPublicRooms());
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  const handleJoin = async (room: RoomDoc) => {
+  const join = async (room: RoomDoc) => {
     if (!session) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (!room.memberUids.includes(session.user.uid)) {
-      await joinRoom(room.roomId, session.user.uid);
-    }
+    if (!room.memberUids.includes(session.user.uid)) await joinRoom(room.roomId, session.user.uid);
     navigation.navigate("Room", { roomId: room.roomId });
   };
 
-  const handleCreate = async () => {
-    if (!session || !newRoomName.trim()) return;
+  const create = async () => {
+    if (!session || !roomName.trim()) return;
     setCreating(true);
     try {
-      const roomId = await createRoom({ name: newRoomName.trim(), isPublic, createdBy: session.user.uid });
-      setModalOpen(false);
-      setNewRoomName("");
-      navigation.navigate("Room", { roomId });
+      const id = await createRoom({
+        name: roomName.trim(),
+        isPublic: visibility === "public",
+        createdBy: session.user.uid,
+      });
+      setOpen(false);
+      setRoomName("");
+      navigation.navigate("Room", { roomId: id });
     } finally {
       setCreating(false);
     }
@@ -75,117 +70,163 @@ export default function RoomListScreen({ navigation }: Props) {
 
   return (
     <Screen edges={["top", "left", "right"]}>
+      {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Welcome back</Text>
-          <Text style={styles.title}>{profile?.displayName ?? "…"}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.kicker}>Welcome back</Text>
+          <Text style={styles.name} numberOfLines={1}>{profile?.displayName ?? "…"}</Text>
         </View>
-        <View style={styles.headerButtons}>
-          <IconButton emoji="🏆" onPress={() => navigation.navigate("GlobalLeaderboard")} />
-          <IconButton emoji="👤" onPress={() => navigation.navigate("Profile")} />
-        </View>
+        <Pressable
+          onPress={() => { Haptics.selectionAsync(); navigation.navigate("GlobalLeaderboard"); }}
+          style={styles.iconBtn}
+        >
+          <Text style={styles.iconBtnGlyph}>🏆</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => { Haptics.selectionAsync(); navigation.navigate("Profile"); }}
+          style={styles.iconBtn}
+        >
+          <Text style={styles.iconBtnGlyph}>👤</Text>
+        </Pressable>
       </View>
 
-      <Animated.View entering={FadeInDown.duration(400)} style={styles.statsRow}>
-        <StatPill icon="🔥" value={profile?.currentStreak ?? 0} label="streak" tone="primary" />
-        <StatPill icon="⭐" value={profile?.xp ?? 0} label="XP" tone="gold" />
-        <StatPill icon="🏅" value={profile?.badges?.length ?? 0} label="badges" tone="up" />
-      </Animated.View>
-
-      <Text style={styles.sectionTitle}>Public Rooms</Text>
-
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: spacing(10) }} color={colors.primary} />
-      ) : (
-        <FlatList
-          data={rooms}
-          keyExtractor={(r) => r.roomId}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                load();
-              }}
-              tintColor={colors.text}
-            />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyEmoji}>🎯</Text>
-              <Text style={styles.empty}>No public rooms yet.{"\n"}Create the first one.</Text>
-            </View>
-          }
-          renderItem={({ item, index }) => (
-            <Animated.View entering={FadeInDown.delay(index * 60).duration(350)}>
-              <Pressable onPress={() => handleJoin(item)}>
-                {({ pressed }) => (
-                  <Card style={[styles.roomCard, pressed && styles.roomCardPressed]}>
-                    <View style={styles.roomIconWrap}>
-                      <LinearGradient colors={colors.gradientPrimary} style={styles.roomIcon}>
-                        <Text style={styles.roomIconText}>{item.name.charAt(0).toUpperCase()}</Text>
-                      </LinearGradient>
+      <FlatList
+        data={rooms}
+        keyExtractor={(r) => r.roomId}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(); }}
+            tintColor={colors.accent}
+          />
+        }
+        ListHeaderComponent={
+          <>
+            {/* Hero streak card — the one dominant element */}
+            <Animated.View entering={FadeInDown.duration(420)}>
+              <Card tone="paper" padded={20} elevated style={styles.heroCard}>
+                <View style={styles.heroTop}>
+                  <View>
+                    <Text style={styles.heroKicker}>Current streak</Text>
+                    <View style={styles.heroValueRow}>
+                      <Text style={styles.heroValue}>{profile?.currentStreak ?? 0}</Text>
+                      <Text style={styles.heroFlame}>🔥</Text>
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.roomName}>{item.name}</Text>
-                      <View style={styles.roomMetaRow}>
-                        <Text style={styles.roomMeta}>
-                          {item.memberUids.length} member{item.memberUids.length === 1 ? "" : "s"}
-                        </Text>
-                        {item.activeMarket ? (
-                          <Badge label={`${item.activeMarket.symbol} · ${item.activeMarket.window}`} tone="primary" size="sm" />
-                        ) : null}
-                      </View>
+                  </View>
+                  <View style={styles.heroStats}>
+                    <View style={styles.heroStat}>
+                      <Text style={styles.heroStatV}>{profile?.bestStreak ?? 0}</Text>
+                      <Text style={styles.heroStatL}>Best</Text>
                     </View>
-                    <Text style={styles.chevron}>›</Text>
-                  </Card>
-                )}
-              </Pressable>
+                    <View style={styles.heroDivider} />
+                    <View style={styles.heroStat}>
+                      <Text style={styles.heroStatV}>{profile?.xp ?? 0}</Text>
+                      <Text style={styles.heroStatL}>XP</Text>
+                    </View>
+                    <View style={styles.heroDivider} />
+                    <View style={styles.heroStat}>
+                      <Text style={styles.heroStatV}>{profile?.badges?.length ?? 0}</Text>
+                      <Text style={styles.heroStatL}>Badges</Text>
+                    </View>
+                  </View>
+                </View>
+                {wallet.label ? (
+                  <View style={styles.walletRow}>
+                    <Chip
+                      label={wallet.label}
+                      tone={wallet.kind === "embedded" ? "onPaper" : "coral"}
+                      icon="◈"
+                    />
+                    <Text style={styles.walletAddr}>
+                      {wallet.address ? `${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}` : ""}
+                    </Text>
+                  </View>
+                ) : null}
+              </Card>
             </Animated.View>
-          )}
-        />
-      )}
 
-      <Animated.View entering={FadeIn.delay(200)} style={styles.fabWrap}>
-        <GradientButton label="+ New Room" onPress={() => setModalOpen(true)} glow={colors.primaryGlow} />
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>Public rooms</Text>
+              <Text style={styles.sectionCount}>{rooms.length}</Text>
+            </View>
+          </>
+        }
+        ListEmptyComponent={
+          loading ? (
+            <ActivityIndicator color={colors.accent} style={{ marginTop: spacing(8) }} />
+          ) : (
+            <Card style={styles.empty}>
+              <Text style={styles.emptyGlyph}>🎯</Text>
+              <Text style={styles.emptyTitle}>No rooms yet</Text>
+              <Text style={styles.emptyBody}>Create the first one and invite your friends.</Text>
+            </Card>
+          )
+        }
+        renderItem={({ item, index }) => (
+          <Animated.View entering={FadeInDown.delay(index * 55).duration(340)}>
+            <Pressable onPress={() => join(item)}>
+              {({ pressed }) => (
+                <Card style={[styles.roomCard, pressed && styles.pressed]} padded={14}>
+                  <IconTile glyph={item.name.charAt(0).toUpperCase()} tone={index % 2 ? "gold" : "accent"} size={46} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.roomName} numberOfLines={1}>{item.name}</Text>
+                    <View style={styles.roomMeta}>
+                      <Text style={styles.roomMembers}>
+                        {item.memberUids.length} member{item.memberUids.length === 1 ? "" : "s"}
+                      </Text>
+                      {item.activeMarket ? (
+                        <Chip label={`${item.activeMarket.symbol} ${item.activeMarket.window}`} tone="accent" />
+                      ) : null}
+                    </View>
+                  </View>
+                  <Text style={styles.chev}>›</Text>
+                </Card>
+              )}
+            </Pressable>
+          </Animated.View>
+        )}
+      />
+
+      {/* Floating CTA */}
+      <Animated.View entering={FadeIn.delay(160)} style={styles.fab}>
+        <PillButton label="New Room" icon="＋" onPress={() => setOpen(true)} size="lg" full />
       </Animated.View>
 
-      <Modal visible={modalOpen} animationType="slide" transparent onRequestClose={() => setModalOpen(false)}>
-        <BlurView intensity={40} tint="dark" style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Create a Room</Text>
+      {/* Create sheet */}
+      <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
+        <BlurView intensity={30} tint="dark" style={styles.overlay}>
+          <View style={styles.sheet}>
+            <View style={styles.grabber} />
+            <Text style={styles.sheetTitle}>Create a room</Text>
             <TextInput
-              style={styles.input}
+              style={styles.sheetInput}
               placeholder="Room name"
               placeholderTextColor={colors.textFaint}
-              value={newRoomName}
-              onChangeText={setNewRoomName}
+              value={roomName}
+              onChangeText={setRoomName}
+              autoFocus
             />
-            <View style={styles.visibilityRow}>
-              <Pressable
-                style={[styles.visibilityOption, isPublic && styles.visibilityOptionActive]}
-                onPress={() => setIsPublic(true)}
-              >
-                <Text style={[styles.visibilityText, isPublic && styles.visibilityTextActive]}>🌐 Public</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.visibilityOption, !isPublic && styles.visibilityOptionActive]}
-                onPress={() => setIsPublic(false)}
-              >
-                <Text style={[styles.visibilityText, !isPublic && styles.visibilityTextActive]}>🔒 Private</Text>
-              </Pressable>
-            </View>
-            <GradientButton
-              label="Create Room"
-              onPress={handleCreate}
+            <Text style={styles.sheetLabel}>Visibility</Text>
+            <Toggle
+              options={[
+                { value: "public", label: "🌐  Public" },
+                { value: "private", label: "🔒  Private" },
+              ]}
+              value={visibility}
+              onChange={setVisibility}
+            />
+            <PillButton
+              label="Create room"
+              onPress={create}
               loading={creating}
-              disabled={!newRoomName.trim()}
+              disabled={!roomName.trim()}
               size="lg"
-              style={{ marginTop: spacing(4) }}
+              full
+              style={{ marginTop: spacing(5) }}
             />
-            <Pressable onPress={() => setModalOpen(false)} style={styles.cancelButton}>
+            <Pressable onPress={() => setOpen(false)} style={styles.cancel}>
               <Text style={styles.cancelText}>Cancel</Text>
             </Pressable>
           </View>
@@ -195,150 +236,77 @@ export default function RoomListScreen({ navigation }: Props) {
   );
 }
 
-function IconButton({ emoji, onPress }: { emoji: string; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onPress();
-      }}
-      style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
-    >
-      <Text style={styles.iconButtonText}>{emoji}</Text>
-    </Pressable>
-  );
-}
-
-function StatPill({ icon, value, label, tone }: { icon: string; value: number; label: string; tone: "primary" | "gold" | "up" }) {
-  const toneColor = tone === "primary" ? colors.primary : tone === "gold" ? colors.gold : colors.up;
-  return (
-    <Card style={styles.statPill} noPadding>
-      <View style={styles.statContent}>
-        <Text style={styles.statIcon}>{icon}</Text>
-        <Text style={[styles.statValue, { color: toneColor }]}>{value}</Text>
-        <Text style={styles.statLabel}>{label}</Text>
-      </View>
-    </Card>
-  );
-}
-
 const styles = StyleSheet.create({
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    paddingHorizontal: spacing(5),
-    paddingTop: spacing(2),
+    flexDirection: "row", alignItems: "center", gap: spacing(2),
+    paddingHorizontal: spacing(5), paddingTop: spacing(2), paddingBottom: spacing(4),
   },
-  greeting: { ...font.bodySm, color: colors.textFaint },
-  title: { ...font.h1, fontSize: 26, color: colors.text, marginTop: 2 },
-  headerButtons: { flexDirection: "row", gap: spacing(2) },
-  iconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
+  kicker: { ...font.bodySm, color: colors.textFaint },
+  name: { ...font.h1, fontSize: 25, color: colors.text, marginTop: 1 },
+  iconBtn: {
+    width: 44, height: 44, borderRadius: radius.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    alignItems: "center", justifyContent: "center",
   },
-  iconButtonText: { fontSize: 19 },
-  statsRow: {
-    flexDirection: "row",
-    gap: spacing(2.5),
-    paddingHorizontal: spacing(5),
-    marginTop: spacing(5),
+  iconBtnGlyph: { fontSize: 18 },
+
+  list: { paddingHorizontal: spacing(5), paddingBottom: spacing(26), gap: spacing(2.5) },
+
+  heroCard: { marginBottom: spacing(6) },
+  heroTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  heroKicker: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
+  heroValueRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  heroValue: { fontSize: 52, fontWeight: "900", color: colors.paperInk, letterSpacing: -2 },
+  heroFlame: { fontSize: 26 },
+  heroStats: { flexDirection: "row", alignItems: "center", gap: spacing(2.5), marginTop: spacing(2) },
+  heroStat: { alignItems: "center" },
+  heroStatV: { fontSize: 17, fontWeight: "900", color: colors.paperInk },
+  heroStatL: { fontSize: 10, fontWeight: "700", color: colors.paperMuted, textTransform: "uppercase", marginTop: 1 },
+  heroDivider: { width: 1, height: 22, backgroundColor: "rgba(10,11,12,0.12)" },
+  walletRow: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginTop: spacing(4), paddingTop: spacing(3.5),
+    borderTopWidth: 1, borderTopColor: "rgba(10,11,12,0.08)",
   },
-  statPill: { flex: 1 },
-  statContent: { alignItems: "center", paddingVertical: spacing(3) },
-  statIcon: { fontSize: 18, marginBottom: 4 },
-  statValue: { fontSize: 20, fontWeight: "900" },
-  statLabel: { ...font.caption, color: colors.textFaint, marginTop: 2, textTransform: "uppercase" },
-  sectionTitle: {
-    ...font.h3,
-    color: colors.text,
-    paddingHorizontal: spacing(5),
-    marginTop: spacing(7),
-    marginBottom: spacing(3),
+  walletAddr: { ...font.mono, fontSize: 12, color: colors.paperMuted },
+
+  sectionRow: { flexDirection: "row", alignItems: "center", gap: spacing(2), marginBottom: spacing(3) },
+  sectionTitle: { ...font.h3, color: colors.text },
+  sectionCount: {
+    ...font.label, color: colors.textFaint, backgroundColor: colors.surfaceAlt,
+    paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill, overflow: "hidden",
   },
-  list: { paddingHorizontal: spacing(5), paddingBottom: spacing(24), gap: spacing(3) },
-  emptyState: { alignItems: "center", marginTop: spacing(12) },
-  emptyEmoji: { fontSize: 40, marginBottom: spacing(2) },
-  empty: { color: colors.textFaint, textAlign: "center", lineHeight: 20 },
-  roomCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: spacing(4),
-    gap: spacing(3),
+
+  roomCard: { flexDirection: "row", alignItems: "center", gap: spacing(3) },
+  pressed: { opacity: 0.82, transform: [{ scale: 0.992 }] },
+  roomName: { ...font.h3, fontSize: 15.5, color: colors.text },
+  roomMeta: { flexDirection: "row", alignItems: "center", gap: spacing(2), marginTop: 3 },
+  roomMembers: { ...font.bodySm, fontSize: 12, color: colors.textFaint },
+  chev: { color: colors.textFaint, fontSize: 24, fontWeight: "300" },
+
+  empty: { alignItems: "center", paddingVertical: spacing(9) },
+  emptyGlyph: { fontSize: 34, marginBottom: spacing(2) },
+  emptyTitle: { ...font.h3, color: colors.text },
+  emptyBody: { ...font.bodySm, color: colors.textFaint, marginTop: 4, textAlign: "center" },
+
+  fab: { position: "absolute", bottom: spacing(7), left: spacing(5), right: spacing(5) },
+
+  overlay: { flex: 1, justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: colors.bgRaised,
+    borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl,
+    padding: spacing(6), paddingTop: spacing(3),
+    borderWidth: 1, borderBottomWidth: 0, borderColor: colors.border,
   },
-  roomCardPressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
-  roomIconWrap: {},
-  roomIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
+  grabber: { width: 42, height: 4, borderRadius: 2, backgroundColor: colors.borderBright, alignSelf: "center", marginBottom: spacing(5) },
+  sheetTitle: { ...font.h2, color: colors.text, marginBottom: spacing(4) },
+  sheetInput: {
+    backgroundColor: colors.surfaceAlt, borderRadius: radius.md,
+    paddingHorizontal: spacing(4), paddingVertical: spacing(3.5),
+    color: colors.text, fontSize: 15.5, fontWeight: "600",
+    borderWidth: 1, borderColor: colors.border, marginBottom: spacing(4),
   },
-  roomIconText: { color: "#fff", fontWeight: "800", fontSize: 18 },
-  roomName: { ...font.h3, color: colors.text, fontSize: 16 },
-  roomMetaRow: { flexDirection: "row", alignItems: "center", gap: spacing(2), marginTop: 4 },
-  roomMeta: { ...font.bodySm, color: colors.textFaint },
-  chevron: { color: colors.textFaint, fontSize: 26, fontWeight: "300" },
-  fabWrap: {
-    position: "absolute",
-    bottom: spacing(6),
-    left: spacing(5),
-    right: spacing(5),
-  },
-  modalOverlay: { flex: 1, justifyContent: "flex-end" },
-  modalCard: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing(6),
-    paddingTop: spacing(3),
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderBottomWidth: 0,
-  },
-  modalHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-    alignSelf: "center",
-    marginBottom: spacing(4),
-  },
-  modalTitle: { ...font.h2, color: colors.text, marginBottom: spacing(4) },
-  input: {
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing(4),
-    paddingVertical: spacing(3.5),
-    color: colors.text,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing(3),
-  },
-  visibilityRow: { flexDirection: "row", gap: spacing(2) },
-  visibilityOption: {
-    flex: 1,
-    paddingVertical: spacing(3),
-    borderRadius: radius.md,
-    alignItems: "center",
-    backgroundColor: colors.surfaceAlt,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  visibilityOptionActive: {
-    backgroundColor: "rgba(124,92,255,0.16)",
-    borderColor: colors.primary,
-  },
-  visibilityText: { color: colors.textMuted, fontWeight: "700" },
-  visibilityTextActive: { color: colors.primary },
-  cancelButton: { marginTop: spacing(4), alignItems: "center", paddingVertical: spacing(2) },
-  cancelText: { color: colors.textFaint, fontWeight: "600" },
+  sheetLabel: { ...font.label, color: colors.textFaint, textTransform: "uppercase", marginBottom: spacing(2) },
+  cancel: { alignItems: "center", paddingVertical: spacing(3), marginTop: spacing(1) },
+  cancelText: { ...font.body, color: colors.textFaint, fontWeight: "700" },
 });

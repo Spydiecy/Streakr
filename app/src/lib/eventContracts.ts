@@ -12,8 +12,16 @@ import {
   type UnifiedMarket,
   type MarketOnchain,
 } from "@somnia-chain/markets-sdk";
-import { createReadOnlyExchange, createSignerExchange, VENUE_ID, LOT_RAW, TICK_RAW } from "./chain";
+import {
+  createReadOnlyExchange,
+  createSignerExchange,
+  createWalletClientExchange,
+  VENUE_ID,
+  LOT_RAW,
+  TICK_RAW,
+} from "./chain";
 import type { Direction, Symbol_, WindowLength } from "./types";
+import type { CallSigner } from "./walletTypes";
 
 const WINDOW_SECONDS: Record<WindowLength, number> = {
   "15m": 15 * 60,
@@ -111,13 +119,18 @@ function toSteps(human: number, decimals: number, step: bigint, mode: "round" | 
  * never simulated.
  */
 export async function placeCall(
-  privateKey: `0x${string}`,
+  signer: CallSigner,
   info: LiveMarketInfo,
   direction: Direction,
   stakeUsdso: number,
   maxSlippage = 0.03,
 ): Promise<PlaceCallResult> {
-  const exchange: SomniaMarkets = createSignerExchange(privateKey);
+  // Same trader surface either way — the only difference is where the key
+  // lives (on-device vs in the user's external wallet).
+  const exchange: SomniaMarkets =
+    signer.kind === "embedded"
+      ? createSignerExchange(signer.privateKey)
+      : createWalletClientExchange(signer.walletClient);
   const decimals = info.onchain.decimals;
 
   const outcomes = info.market.outcomes ?? [];

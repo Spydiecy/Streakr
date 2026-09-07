@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, FlatList } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -7,17 +7,20 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
+import { useWallet } from "../lib/WalletProvider";
 import { subscribeUserCalls } from "../lib/firestoreApi";
-import type { CallDoc } from "../lib/types";
-import { BADGE_META, type BadgeKey } from "../lib/types";
+import { BADGE_META, type BadgeKey, type CallDoc } from "../lib/types";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
+import { Chip } from "../components/ui/Chip";
+import { PillButton } from "../components/ui/PillButton";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Profile">;
 
 export default function ProfileScreen({ navigation }: Props) {
   const { session, profile } = useSession();
+  const wallet = useWallet();
   const [calls, setCalls] = useState<CallDoc[]>([]);
   const [copied, setCopied] = useState(false);
 
@@ -26,170 +29,175 @@ export default function ProfileScreen({ navigation }: Props) {
     return subscribeUserCalls(session.user.uid, setCalls);
   }, [session]);
 
-  const handleCopy = async () => {
-    if (!session) return;
-    await Clipboard.setStringAsync(session.wallet.address);
+  const copy = async () => {
+    if (!wallet.address) return;
+    await Clipboard.setStringAsync(wallet.address);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const winCount = calls.filter((c) => c.status === "won").length;
-  const totalSettled = calls.filter((c) => c.status !== "pending").length;
-  const winRate = totalSettled > 0 ? Math.round((winCount / totalSettled) * 100) : 0;
+  const settled = calls.filter((c) => c.status !== "pending");
+  const wins = settled.filter((c) => c.status === "won").length;
+  const rate = settled.length ? Math.round((wins / settled.length) * 100) : 0;
+
+  const disconnect = () => {
+    Alert.alert("Disconnect wallet?", "You can reconnect any time.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Disconnect",
+        style: "destructive",
+        onPress: async () => {
+          await wallet.disconnect();
+          navigation.reset({ index: 0, routes: [{ name: "Onboarding" }] });
+        },
+      },
+    ]);
+  };
 
   return (
     <Screen edges={["top", "left", "right"]}>
-      <View style={styles.headerRow}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backIcon}>‹</Text>
+      <View style={styles.head}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.back}>
+          <Text style={styles.backGlyph}>‹</Text>
         </Pressable>
-        <Text style={styles.title}>Profile</Text>
-        <View style={{ width: 36 }} />
+        <Text style={styles.headTitle}>Profile</Text>
+        <View style={{ width: 40 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Animated.View entering={FadeInDown.duration(400)} style={styles.avatarSection}>
-          <LinearGradient colors={colors.gradientPrimary} style={styles.avatar}>
-            <Text style={styles.avatarText}>{(profile?.displayName ?? "?").charAt(0).toUpperCase()}</Text>
-          </LinearGradient>
-          <Text style={styles.displayName}>{profile?.displayName ?? "…"}</Text>
-          <Pressable onPress={handleCopy} style={styles.walletRow}>
-            <Text style={styles.walletAddress}>
-              {session ? `${session.wallet.address.slice(0, 8)}…${session.wallet.address.slice(-6)}` : "…"}
-            </Text>
-            <Text style={styles.copyHint}>{copied ? "✓ copied" : "tap to copy"}</Text>
-          </Pressable>
+        {/* Identity */}
+        <Animated.View entering={FadeInDown.duration(400)}>
+          <Card tone="paper" padded={20} elevated style={{ alignItems: "center" }}>
+            <LinearGradient colors={colors.gradAccent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.avatar}>
+              <Text style={styles.avatarT}>{(profile?.displayName ?? "?").charAt(0).toUpperCase()}</Text>
+            </LinearGradient>
+            <Text style={styles.name}>{profile?.displayName ?? "…"}</Text>
+            {wallet.label ? <Chip label={wallet.label} tone="onPaper" icon="◈" style={{ marginTop: spacing(2) }} /> : null}
+            <Pressable onPress={copy} style={styles.addrWrap}>
+              <Text style={styles.addr}>
+                {wallet.address ? `${wallet.address.slice(0, 10)}…${wallet.address.slice(-8)}` : "—"}
+              </Text>
+              <Text style={styles.copy}>{copied ? "✓ copied" : "tap to copy"}</Text>
+            </Pressable>
+
+            <View style={styles.stats}>
+              <Stat v={profile?.currentStreak ?? 0} l="Streak" glyph="🔥" />
+              <View style={styles.sep} />
+              <Stat v={profile?.bestStreak ?? 0} l="Best" glyph="🏆" />
+              <View style={styles.sep} />
+              <Stat v={profile?.xp ?? 0} l="XP" glyph="⭐" />
+              <View style={styles.sep} />
+              <Stat v={`${rate}%`} l="Win rate" glyph="🎯" />
+            </View>
+          </Card>
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.statsRow}>
-          <Stat value={profile?.currentStreak ?? 0} label="Streak" emoji="🔥" />
-          <Stat value={profile?.bestStreak ?? 0} label="Best" emoji="🏆" />
-          <Stat value={profile?.xp ?? 0} label="XP" emoji="⭐" />
-          <Stat value={`${winRate}%`} label="Win rate" emoji="🎯" />
-        </Animated.View>
-
-        <Text style={styles.sectionTitle}>Badges</Text>
-        <View style={styles.badgeGrid}>
-          {(Object.keys(BADGE_META) as BadgeKey[]).map((key, i) => {
-            const earned = profile?.badges?.includes(key) ?? false;
-            const meta = BADGE_META[key];
+        {/* Badges */}
+        <Text style={styles.section}>Badges</Text>
+        <View style={styles.grid}>
+          {(Object.keys(BADGE_META) as BadgeKey[]).map((k, i) => {
+            const got = profile?.badges?.includes(k) ?? false;
+            const meta = BADGE_META[k];
             return (
-              <Animated.View key={key} entering={FadeInDown.delay(150 + i * 50).duration(350)} style={styles.badgeItem}>
-                <Card style={[styles.badgeChip, !earned && styles.badgeChipDim]} noPadding>
-                  <View style={styles.badgeChipInner}>
-                    <Text style={[styles.badgeIcon, !earned && styles.dimOpacity]}>{meta.icon}</Text>
-                    <Text style={[styles.badgeLabel, !earned && styles.badgeLabelDim]}>{meta.label}</Text>
-                  </View>
+              <Animated.View key={k} entering={FadeInDown.delay(120 + i * 45).duration(320)} style={styles.gridItem}>
+                <Card
+                  tone={got ? "accentSoft" : "surface"}
+                  padded={12}
+                  style={[styles.badge, !got && styles.badgeOff]}
+                >
+                  <Text style={[styles.badgeGlyph, !got && { opacity: 0.45 }]}>{meta.icon}</Text>
+                  <Text style={[styles.badgeL, got ? styles.badgeLOn : styles.badgeLOff]} numberOfLines={2}>
+                    {meta.label}
+                  </Text>
                 </Card>
               </Animated.View>
             );
           })}
         </View>
 
-        <Text style={styles.sectionTitle}>Call History</Text>
-        <Card noPadding>
-          <FlatList
-            data={calls}
-            keyExtractor={(c) => c.callId}
-            scrollEnabled={false}
-            ListEmptyComponent={<Text style={styles.emptyText}>No calls yet.</Text>}
-            renderItem={({ item, index }) => (
-              <View style={[styles.historyRow, index > 0 && styles.historyRowBorder]}>
-                <View style={styles.historyLeft}>
-                  <Text style={styles.historySymbol}>
-                    {item.symbol} {item.direction === "up" ? "▲" : "▼"}
-                  </Text>
-                  <Text style={styles.historyWindow}>{item.window}</Text>
+        {/* History */}
+        <Text style={styles.section}>Call history</Text>
+        <Card padded={false}>
+          {calls.length === 0 ? (
+            <Text style={styles.empty}>No calls yet.</Text>
+          ) : (
+            calls.map((c, i) => (
+              <View key={c.callId} style={[styles.hrow, i > 0 && styles.hline]}>
+                <Text style={[styles.harrow, { color: c.direction === "up" ? colors.accent : colors.down }]}>
+                  {c.direction === "up" ? "▲" : "▼"}
+                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hsym}>{c.symbol}</Text>
+                  <Text style={styles.hwin}>{c.window} · {c.stakeUsdso.toFixed(2)} tUSDC</Text>
                 </View>
-                <View
-                  style={[
-                    styles.historyStatusPill,
-                    item.status === "won" && styles.historyStatusWon,
-                    item.status === "lost" && styles.historyStatusLost,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.historyStatusText,
-                      item.status === "won" && { color: colors.up },
-                      item.status === "lost" && { color: colors.down },
-                    ]}
-                  >
-                    {item.status.toUpperCase()}
-                  </Text>
-                </View>
+                <Chip
+                  label={c.status}
+                  tone={c.status === "won" ? "up" : c.status === "lost" ? "down" : c.status === "void" ? "neutral" : "gold"}
+                />
               </View>
-            )}
-          />
+            ))
+          )}
         </Card>
+
+        <PillButton label="Disconnect wallet" tone="ink" onPress={disconnect} full style={{ marginTop: spacing(7) }} />
       </ScrollView>
     </Screen>
   );
 }
 
-function Stat({ value, label, emoji }: { value: number | string; label: string; emoji: string }) {
+function Stat({ v, l, glyph }: { v: number | string; l: string; glyph: string }) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statEmoji}>{emoji}</Text>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statGlyph}>{glyph}</Text>
+      <Text style={styles.statV}>{v}</Text>
+      <Text style={styles.statL}>{l}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing(5), paddingTop: spacing(2) },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
+  head: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing(5), paddingTop: spacing(2), paddingBottom: spacing(3) },
+  back: {
+    width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center",
   },
-  backIcon: { color: colors.text, fontSize: 22, marginTop: -2 },
-  title: { ...font.h3, color: colors.text, flex: 1, textAlign: "center" },
-  scroll: { paddingHorizontal: spacing(5), paddingBottom: spacing(14) },
-  avatarSection: { alignItems: "center", marginTop: spacing(4), marginBottom: spacing(6) },
-  avatar: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing(3),
+  backGlyph: { color: colors.text, fontSize: 22, marginTop: -3 },
+  headTitle: { ...font.h3, color: colors.text, flex: 1, textAlign: "center" },
+  scroll: { paddingHorizontal: spacing(5), paddingBottom: spacing(12) },
+
+  avatar: { width: 76, height: 76, borderRadius: 38, alignItems: "center", justifyContent: "center" },
+  avatarT: { fontSize: 32, fontWeight: "900", color: colors.onAccent },
+  name: { ...font.h2, color: colors.paperInk, marginTop: spacing(3) },
+  addrWrap: { alignItems: "center", marginTop: spacing(2) },
+  addr: { ...font.mono, fontSize: 12, color: colors.paperMuted },
+  copy: { fontSize: 10.5, fontWeight: "800", color: colors.accentDeep, marginTop: 3, textTransform: "uppercase" },
+
+  stats: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginTop: spacing(5), paddingTop: spacing(4),
+    borderTopWidth: 1, borderTopColor: "rgba(10,11,12,0.08)", alignSelf: "stretch",
   },
-  avatarText: { color: "#fff", fontSize: 34, fontWeight: "800" },
-  displayName: { ...font.h2, color: colors.text },
-  walletRow: { alignItems: "center", marginTop: spacing(1.5) },
-  walletAddress: { color: colors.textFaint, fontSize: 13, fontVariant: ["tabular-nums"] },
-  copyHint: { color: colors.primary, fontSize: 11, marginTop: 3, fontWeight: "600" },
-  statsRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: spacing(7) },
   stat: { alignItems: "center", flex: 1 },
-  statEmoji: { fontSize: 18, marginBottom: 4 },
-  statValue: { color: colors.text, fontSize: 20, fontWeight: "900" },
-  statLabel: { color: colors.textFaint, fontSize: 11, marginTop: 2, textTransform: "uppercase" },
-  sectionTitle: { ...font.h3, color: colors.text, marginBottom: spacing(3) },
-  badgeGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing(2.5), marginBottom: spacing(7) },
-  badgeItem: { width: "30.5%" },
-  badgeChip: { alignItems: "center" },
-  badgeChipDim: { opacity: 0.4 },
-  badgeChipInner: { alignItems: "center", paddingVertical: spacing(3.5) },
-  badgeIcon: { fontSize: 26 },
-  dimOpacity: { opacity: 0.5 },
-  badgeLabel: { color: colors.text, fontSize: 10.5, marginTop: 6, textAlign: "center", fontWeight: "600" },
-  badgeLabelDim: { color: colors.textFaint },
-  emptyText: { color: colors.textFaint, textAlign: "center", paddingVertical: spacing(6) },
-  historyRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing(4) },
-  historyRowBorder: { borderTopWidth: 1, borderTopColor: colors.border },
-  historyLeft: { flexDirection: "row", alignItems: "center", gap: spacing(2) },
-  historySymbol: { color: colors.text, fontWeight: "700" },
-  historyWindow: { color: colors.textFaint, fontSize: 12 },
-  historyStatusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt },
-  historyStatusWon: { backgroundColor: colors.upDim },
-  historyStatusLost: { backgroundColor: colors.downDim },
-  historyStatusText: { color: colors.textFaint, fontWeight: "800", fontSize: 10.5 },
+  statGlyph: { fontSize: 15, marginBottom: 3 },
+  statV: { fontSize: 18, fontWeight: "900", color: colors.paperInk },
+  statL: { fontSize: 9.5, fontWeight: "800", color: colors.paperMuted, textTransform: "uppercase", marginTop: 1 },
+  sep: { width: 1, height: 30, backgroundColor: "rgba(10,11,12,0.1)" },
+
+  section: { ...font.h3, color: colors.text, marginTop: spacing(7), marginBottom: spacing(3) },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing(2.5) },
+  gridItem: { width: "31%" },
+  badge: { alignItems: "center" },
+  badgeOff: { opacity: 0.5 },
+  badgeGlyph: { fontSize: 24 },
+  badgeL: { fontSize: 10, textAlign: "center", marginTop: 6, fontWeight: "800" },
+  badgeLOn: { color: colors.accentDeep },
+  badgeLOff: { color: colors.textFaint },
+
+  empty: { ...font.bodySm, color: colors.textFaint, textAlign: "center", paddingVertical: spacing(7) },
+  hrow: { flexDirection: "row", alignItems: "center", gap: spacing(3), padding: spacing(4) },
+  hline: { borderTopWidth: 1, borderTopColor: colors.border },
+  harrow: { fontSize: 15, fontWeight: "900" },
+  hsym: { color: colors.text, fontWeight: "800", fontSize: 14 },
+  hwin: { ...font.bodySm, fontSize: 11.5, color: colors.textFaint, marginTop: 1 },
 });

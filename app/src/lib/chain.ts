@@ -117,6 +117,26 @@ export function createSignerExchange(privateKey: `0x${string}`): SomniaMarkets {
   });
 }
 
+/**
+ * Signing exchange bound to an external wallet (RainbowKit / wagmi).
+ *
+ * The SDK accepts a viem WalletClient in place of a raw private key; on that
+ * path it asks the wallet to sign and confirms via the newHeads subscription
+ * rather than signing locally with a tracked nonce. Same trader surface either
+ * way, so callers don't branch beyond constructing the right exchange.
+ */
+export function createWalletClientExchange(walletClient: unknown): SomniaMarkets {
+  const ep = ENDPOINTS[NETWORK];
+  return new SomniaMarkets({
+    indexerUrl: ep.indexer,
+    chain: makeChain(),
+    wsRpcUrl: ep.ws,
+    addresses: deployment().addresses as any,
+    priceFeed: NETWORK === "testnet" ? SOMNIA_TESTNET_PRICE_FEED : undefined,
+    walletClient: walletClient as any,
+  } as any);
+}
+
 export function explorerTxUrl(hash: string): string {
   return NETWORK === "testnet"
     ? `https://shannon-explorer.somnia.network/tx/${hash}`

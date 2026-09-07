@@ -1,22 +1,36 @@
 import React from "react";
-import { View, StyleSheet, ViewStyle, StyleProp } from "react-native";
+import { View, StyleSheet, type ViewStyle, type StyleProp } from "react-native";
 import { colors, radius, shadow } from "../../theme";
+
+export type CardTone = "surface" | "raised" | "paper" | "accentSoft";
 
 interface Props {
   children: React.ReactNode;
+  tone?: CardTone;
   style?: StyleProp<ViewStyle>;
+  padded?: boolean | number;
   elevated?: boolean;
-  noPadding?: boolean;
+  bordered?: boolean;
 }
 
-/** The app's base surface — every "panel" of content sits in one of these. */
-export function Card({ children, style, elevated, noPadding }: Props) {
+const TONES: Record<CardTone, ViewStyle> = {
+  surface: { backgroundColor: colors.surface, borderColor: colors.border },
+  raised: { backgroundColor: colors.surfaceAlt, borderColor: colors.borderBright },
+  paper: { backgroundColor: colors.paper, borderColor: "transparent" },
+  accentSoft: { backgroundColor: colors.accentSoft, borderColor: "transparent" },
+};
+
+/** Base surface. Every panel of content on every screen sits in one of these. */
+export function Card({ children, tone = "surface", style, padded = true, elevated, bordered = true }: Props) {
+  const pad = padded === true ? 18 : padded === false ? 0 : padded;
   return (
     <View
       style={[
         styles.card,
+        TONES[tone],
+        bordered && styles.bordered,
         elevated && shadow.card,
-        !noPadding && styles.padded,
+        { padding: pad },
         style,
       ]}
     >
@@ -26,14 +40,6 @@ export function Card({ children, style, elevated, noPadding }: Props) {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: "hidden",
-  },
-  padded: {
-    padding: 20,
-  },
+  card: { borderRadius: radius.xl, overflow: "hidden" },
+  bordered: { borderWidth: 1 },
 });

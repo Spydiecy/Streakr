@@ -19,12 +19,12 @@ export default function RootNavigator() {
       theme={{
         dark: true,
         colors: {
-          primary: colors.primary,
+          primary: colors.accent,
           background: colors.bg,
           card: colors.surface,
           text: colors.text,
           border: colors.border,
-          notification: colors.primary,
+          notification: colors.accent,
         },
         fonts: {
           regular: { fontFamily: "System", fontWeight: "400" },

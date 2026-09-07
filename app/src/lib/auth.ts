@@ -1,26 +1,31 @@
-// Onboarding flow: create/load the embedded wallet, sign into Firebase
-// anonymously, and ensure a users/{uid} doc exists. This is the "wallet
-// connect -> lightweight Firebase Auth session" step from Phase 3.
+// Session bootstrap: Firebase anonymous sign-in + the users/{uid} doc.
+//
+// The wallet itself is owned by WalletProvider (RainbowKit on web, embedded on
+// native) — this module only takes the resulting address and attaches a
+// Firebase identity to it. Anonymous auth gives every install a stable uid to
+// key Firestore docs off without a second credential for the user to manage;
+// the wallet address is what's displayed and shared.
 
 import { signInAnonymously, onAuthStateChanged, type User } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { getFirebaseAuth, getDb } from "./firebase";
-import { loadOrCreateWallet, type StreakrWallet } from "./wallet";
 import type { UserDoc } from "./types";
 
 export interface StreakrSession {
   user: User;
-  wallet: StreakrWallet;
+  walletAddress: `0x${string}`;
   profile: UserDoc;
 }
 
-/**
- * Full onboarding: embedded wallet (create-if-missing) -> Firebase anonymous
- * sign-in (create-if-missing) -> users/{uid} doc (create-if-missing). Safe to
- * call every app launch; each step is idempotent.
- */
-export async function bootstrapSession(displayName?: string): Promise<StreakrSession> {
-  const wallet = await loadOrCreateWallet();
+function shortAddr(addr: string) {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+/** Idempotent: safe to call on every launch and on every wallet change. */
+export async function bootstrapSession(
+  walletAddress: `0x${string}`,
+  displayName?: string,
+): Promise<StreakrSession> {
   const auth = getFirebaseAuth();
 
   const user = await new Promise<User>((resolve, reject) => {
@@ -34,9 +39,7 @@ export async function bootstrapSession(displayName?: string): Promise<StreakrSes
       },
       reject,
     );
-    if (!auth.currentUser) {
-      signInAnonymously(auth).catch(reject);
-    }
+    if (!auth.currentUser) signInAnonymously(auth).catch(reject);
   });
 
   const userRef = doc(getDb(), "users", user.uid);
@@ -45,17 +48,16 @@ export async function bootstrapSession(displayName?: string): Promise<StreakrSes
   let profile: UserDoc;
   if (snap.exists()) {
     profile = snap.data() as UserDoc;
-    // Keep the wallet address in sync in case the local key was regenerated.
-    if (profile.walletAddress !== wallet.address) {
-      await setDoc(userRef, { walletAddress: wallet.address, updatedAt: Date.now() }, { merge: true });
-      profile = { ...profile, walletAddress: wallet.address };
+    // Keep the address in sync — the user may have switched wallets.
+    if (profile.walletAddress !== walletAddress) {
+      await setDoc(userRef, { walletAddress, updatedAt: Date.now() }, { merge: true });
+      profile = { ...profile, walletAddress };
     }
   } else {
-    const shortAddr = `${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}`;
     profile = {
       uid: user.uid,
-      walletAddress: wallet.address,
-      displayName: displayName?.trim() || shortAddr,
+      walletAddress,
+      displayName: displayName?.trim() || shortAddr(walletAddress),
       xp: 0,
       currentStreak: 0,
       bestStreak: 0,
@@ -66,9 +68,5 @@ export async function bootstrapSession(displayName?: string): Promise<StreakrSes
     await setDoc(userRef, profile);
   }
 
-  return { user, wallet, profile };
-}
-
-export function subscribeAuthState(cb: (user: User | null) => void): () => void {
-  return onAuthStateChanged(getFirebaseAuth(), cb);
+  return { user, walletAddress, profile };
 }

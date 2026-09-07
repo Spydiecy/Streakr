@@ -1,109 +1,120 @@
 import React, { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  StyleSheet,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-} from "react-native";
+import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, KeyboardAvoidingView, Platform } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
+import { useWallet } from "../lib/WalletProvider";
 import { useSession } from "../lib/SessionContext";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
-import { GradientButton } from "../components/ui/GradientButton";
+import { Chip } from "../components/ui/Chip";
+import { PillButton } from "../components/ui/PillButton";
+import { IconTile } from "../components/ui/IconTile";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Onboarding">;
 
-const FEATURES = [
-  { emoji: "⚡", text: "Real on-chain calls, settled automatically" },
-  { emoji: "🔥", text: "Streaks, XP, and badges with friends" },
-  { emoji: "🛡️", text: "Capped risk — never lose more than your stake" },
+const PERKS = [
+  { glyph: "⚡", tone: "accent" as const, title: "Real on-chain calls", body: "Signed on DreamDEX, settled automatically" },
+  { glyph: "🔥", tone: "gold" as const, title: "Streaks & badges", body: "Build a run, climb the room board" },
+  { glyph: "🛡", tone: "ink" as const, title: "Capped downside", body: "Never lose more than your stake" },
 ];
 
 export default function OnboardingScreen({ navigation }: Props) {
-  const { loading, error, session, refresh } = useSession();
-  const [displayName, setDisplayName] = useState("");
-  const [connecting, setConnecting] = useState(false);
+  const wallet = useWallet();
+  const { session, error, setDisplayName } = useSession();
+  const [name, setName] = useState("");
 
-  const handleConnect = async () => {
-    setConnecting(true);
-    try {
-      await refresh(displayName);
-      navigation.replace("RoomList");
-    } catch (e) {
-      Alert.alert("Couldn't connect", (e as Error).message);
-    } finally {
-      setConnecting(false);
-    }
+  // Once a wallet is connected AND the Firebase session is attached, go in.
+  useEffect(() => {
+    if (wallet.isConnected && session) navigation.replace("RoomList");
+  }, [wallet.isConnected, session, navigation]);
+
+  const handleConnect = () => {
+    if (name.trim()) setDisplayName(name.trim());
+    wallet.connect();
   };
 
-  useEffect(() => {
-    if (!loading && session) navigation.replace("RoomList");
-  }, [loading, session]);
+  const handleDemo = () => {
+    if (name.trim()) setDisplayName(name.trim());
+    wallet.useEmbedded();
+  };
 
   return (
     <Screen glow="none">
-      <LinearGradient colors={colors.gradientHero} style={styles.heroGradient} />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <Animated.View entering={FadeInDown.duration(500).springify()} style={styles.hero}>
-            <View style={styles.logoBadge}>
-              <LinearGradient colors={colors.gradientPrimary} style={styles.logoGradient}>
-                <Text style={styles.logoEmoji}>🔥</Text>
-              </LinearGradient>
-            </View>
-            <Text style={styles.logo}>Streakr</Text>
-            <Text style={styles.tagline}>
-              Call BTC or ETH. Up or Down.{"\n"}Real calls, real streaks.
-            </Text>
+      <LinearGradient colors={colors.gradHero} style={styles.hero} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <Animated.View entering={FadeInDown.duration(500).springify()} style={styles.brandBlock}>
+            <LinearGradient colors={colors.gradAccent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.mark}>
+              <Text style={styles.markGlyph}>🔥</Text>
+            </LinearGradient>
+            <Text style={styles.wordmark}>Streakr</Text>
+            <Text style={styles.tagline}>Call it. Own the streak.</Text>
+            <Chip label="Somnia Testnet" tone="accent" icon="●" style={{ marginTop: spacing(3) }} />
           </Animated.View>
 
-          <Animated.View entering={FadeIn.delay(200).duration(500)} style={styles.features}>
-            {FEATURES.map((f, i) => (
-              <View key={f.text} style={styles.featureRow}>
-                <Text style={styles.featureEmoji}>{f.emoji}</Text>
-                <Text style={styles.featureText}>{f.text}</Text>
+          <Animated.View entering={FadeIn.delay(180).duration(450)} style={styles.perks}>
+            {PERKS.map((p) => (
+              <View key={p.title} style={styles.perkRow}>
+                <IconTile glyph={p.glyph} tone={p.tone} size={40} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.perkTitle}>{p.title}</Text>
+                  <Text style={styles.perkBody}>{p.body}</Text>
+                </View>
               </View>
             ))}
           </Animated.View>
 
-          <Animated.View entering={FadeInUp.delay(300).duration(500).springify()}>
-            <Card style={styles.card}>
-              <Text style={styles.label}>Display name (optional)</Text>
+          <Animated.View entering={FadeInUp.delay(280).duration(450).springify()}>
+            <Card tone="paper" padded={20} elevated>
+              <Text style={styles.cardKicker}>Get started</Text>
+              <Text style={styles.cardTitle}>Connect your wallet</Text>
+
               <TextInput
                 style={styles.input}
-                placeholder="e.g. satoshi_sim"
-                placeholderTextColor={colors.textFaint}
-                value={displayName}
-                onChangeText={setDisplayName}
+                placeholder="Display name (optional)"
+                placeholderTextColor={colors.paperMuted}
+                value={name}
+                onChangeText={setName}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
 
-              <GradientButton
-                label="Connect Wallet"
+              <PillButton
+                label={wallet.supportsExternal ? "Connect Wallet" : "Create Device Wallet"}
+                icon="◈"
                 onPress={handleConnect}
-                loading={connecting}
+                loading={wallet.connecting}
                 size="lg"
-                glow={colors.primaryGlow}
-                style={{ marginTop: spacing(2) }}
+                full
+                style={{ marginTop: spacing(3) }}
               />
 
-              <Text style={styles.disclaimer}>
-                Creates a Somnia testnet wallet on this device and signs you in. Every call you make is a
-                real, wallet-signed transaction on DreamDEX Event Contracts — testnet funds only.
-              </Text>
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+              {wallet.supportsExternal ? (
+                <>
+                  <View style={styles.orRow}>
+                    <View style={styles.rule} />
+                    <Text style={styles.orText}>or</Text>
+                    <View style={styles.rule} />
+                  </View>
+                  <Pressable onPress={handleDemo} style={styles.demoBtn}>
+                    <Text style={styles.demoText}>Use the pre-funded demo wallet</Text>
+                  </Pressable>
+                  <Text style={styles.demoHint}>
+                    An external wallet won't hold Somnia testnet STT or tUSDC, so the demo wallet is the
+                    fastest way to run a full call cycle.
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.demoHint}>
+                  Creates a testnet wallet in this device's keychain. Every call is a real signed
+                  transaction — testnet funds only.
+                </Text>
+              )}
+
+              {error ? <Text style={styles.error}>{error}</Text> : null}
             </Card>
           </Animated.View>
         </ScrollView>
@@ -113,101 +124,43 @@ export default function OnboardingScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  heroGradient: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 420,
-  },
-  scroll: {
-    flexGrow: 1,
-    justifyContent: "center",
-    padding: spacing(6),
-    paddingBottom: spacing(10),
-  },
-  hero: {
-    alignItems: "center",
-    marginBottom: spacing(8),
-  },
-  logoBadge: {
-    marginBottom: spacing(4),
-  },
-  logoGradient: {
-    width: 76,
-    height: 76,
-    borderRadius: radius.xl,
+  hero: { position: "absolute", top: 0, left: 0, right: 0, height: 460 },
+  scroll: { flexGrow: 1, justifyContent: "center", padding: spacing(6), paddingBottom: spacing(10) },
+  brandBlock: { alignItems: "center", marginBottom: spacing(9) },
+  mark: {
+    width: 72,
+    height: 72,
+    borderRadius: radius.lg,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: colors.primary,
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
+    shadowColor: colors.accent,
+    shadowOpacity: 0.45,
+    shadowRadius: 22,
     shadowOffset: { width: 0, height: 8 },
   },
-  logoEmoji: {
-    fontSize: 36,
-  },
-  logo: {
-    ...font.h1,
-    fontSize: 40,
-    color: colors.text,
-  },
-  tagline: {
-    ...font.body,
-    color: colors.textMuted,
-    textAlign: "center",
-    marginTop: spacing(2),
-    lineHeight: 22,
-  },
-  features: {
-    marginBottom: spacing(8),
-    gap: spacing(3),
-  },
-  featureRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing(3),
-  },
-  featureEmoji: {
-    fontSize: 20,
-    width: 32,
-    textAlign: "center",
-  },
-  featureText: {
-    ...font.body,
-    color: colors.textMuted,
-    flex: 1,
-  },
-  card: {
-    padding: spacing(6),
-  },
-  label: {
-    ...font.caption,
-    color: colors.textMuted,
-    marginBottom: spacing(2),
-    textTransform: "uppercase",
-  },
+  markGlyph: { fontSize: 34 },
+  wordmark: { ...font.display, color: colors.text, marginTop: spacing(4) },
+  tagline: { ...font.body, color: colors.textMuted, marginTop: spacing(1) },
+  perks: { gap: spacing(4), marginBottom: spacing(9) },
+  perkRow: { flexDirection: "row", alignItems: "center", gap: spacing(3.5) },
+  perkTitle: { ...font.h3, fontSize: 15, color: colors.text },
+  perkBody: { ...font.bodySm, color: colors.textFaint, marginTop: 2 },
+  cardKicker: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
+  cardTitle: { ...font.h2, color: colors.paperInk, marginTop: spacing(1.5), marginBottom: spacing(4) },
   input: {
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: "rgba(10,11,12,0.05)",
     borderRadius: radius.md,
     paddingHorizontal: spacing(4),
     paddingVertical: spacing(3.5),
-    color: colors.text,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
+    color: colors.paperInk,
+    fontSize: 15,
+    fontWeight: "600",
   },
-  disclaimer: {
-    marginTop: spacing(4),
-    fontSize: 12,
-    color: colors.textFaint,
-    lineHeight: 17,
-    textAlign: "center",
-  },
-  errorText: {
-    marginTop: spacing(2),
-    color: colors.down,
-    fontSize: 13,
-    textAlign: "center",
-  },
+  orRow: { flexDirection: "row", alignItems: "center", gap: spacing(3), marginVertical: spacing(4) },
+  rule: { flex: 1, height: 1, backgroundColor: "rgba(10,11,12,0.1)" },
+  orText: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
+  demoBtn: { alignItems: "center", paddingVertical: spacing(2) },
+  demoText: { ...font.body, color: colors.paperInk, fontWeight: "800", textDecorationLine: "underline" },
+  demoHint: { marginTop: spacing(3), fontSize: 12, lineHeight: 17, color: colors.paperMuted, textAlign: "center" },
+  error: { marginTop: spacing(3), color: colors.down, fontSize: 12.5, textAlign: "center" },
 });

@@ -1,39 +1,31 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Share, Alert } from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Share, Alert, Linking } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import Animated, {
-  FadeIn,
-  FadeInDown,
-  ZoomIn,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withSequence,
-  withTiming,
+  FadeIn, FadeInDown, ZoomIn,
+  useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming,
 } from "react-native-reanimated";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { subscribeCall } from "../lib/firestoreApi";
 import type { CallDoc } from "../lib/types";
-import { colors, radius, font, spacing } from "../theme";
 import { explorerTxUrl } from "../lib/chain";
+import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
-import { GradientButton } from "../components/ui/GradientButton";
+import { PillButton } from "../components/ui/PillButton";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Result">;
 
-const STATUS_META: Record<string, { emoji: string; color: string; gradient: readonly [string, string]; label: string }> = {
-  pending: { emoji: "⏳", color: colors.textMuted, gradient: ["#2b2f38", "#1c1f27"], label: "Settling…" },
-  won: { emoji: "🎉", color: colors.up, gradient: colors.gradientUp, label: "YOU WON" },
-  lost: { emoji: "💥", color: colors.down, gradient: colors.gradientDown, label: "NOT THIS TIME" },
-  void: { emoji: "⚪️", color: colors.voidColor, gradient: ["#4b5563", "#374151"], label: "VOIDED" },
+const META: Record<string, { glyph: string; label: string; tint: string; grad: readonly [string, string]; ink: string }> = {
+  pending: { glyph: "◷", label: "SETTLING", tint: colors.textMuted, grad: ["#26282d", "#1c1e22"], ink: colors.text },
+  won:     { glyph: "🎉", label: "YOU WON", tint: colors.accent, grad: colors.gradAccent, ink: colors.upInk },
+  lost:    { glyph: "💥", label: "NOT THIS TIME", tint: colors.down, grad: colors.gradDown, ink: "#fff" },
+  void:    { glyph: "⚪️", label: "VOIDED", tint: colors.neutral, grad: ["#5b636f", "#434a54"], ink: "#fff" },
 };
 
-function resultCardUrl(): string | undefined {
-  return process.env.EXPO_PUBLIC_RESULT_CARD_URL;
-}
+const cardUrl = () => process.env.EXPO_PUBLIC_RESULT_CARD_URL;
 
 export default function ResultScreen({ route, navigation }: Props) {
   const { callId, roomId } = route.params;
@@ -43,12 +35,16 @@ export default function ResultScreen({ route, navigation }: Props) {
   useEffect(() => subscribeCall(callId, setCall), [callId]);
 
   const status = call?.status ?? "pending";
-  const meta = STATUS_META[status];
+  const m = META[status];
 
   useEffect(() => {
     if (status === "pending") {
-      pulse.value = withRepeat(withSequence(withTiming(1.06, { duration: 900 }), withTiming(1, { duration: 900 })), -1, true);
+      pulse.value = withRepeat(
+        withSequence(withTiming(1.05, { duration: 900 }), withTiming(1, { duration: 900 })),
+        -1, true,
+      );
     } else {
+      pulse.value = withTiming(1);
       Haptics.notificationAsync(
         status === "won" ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning,
       );
@@ -57,17 +53,19 @@ export default function ResultScreen({ route, navigation }: Props) {
 
   const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulse.value }] }));
 
-  const cardImageUrl = () => {
-    const base = resultCardUrl();
+  const image = () => {
+    const base = cardUrl();
     if (!base) return null;
     return base.endsWith("/") ? `${base}?cardId=${callId}` : `${base}/?cardId=${callId}`;
   };
 
-  const handleShare = async () => {
-    const url = cardImageUrl();
+  const share = async () => {
+    const url = image();
     try {
       await Share.share({
-        message: `${meta.emoji} I called ${call?.symbol} ${call?.direction?.toUpperCase()} on Streakr — ${meta.label}! 🔥 streak: ${call?.streakAfter ?? "?"}${url ? `\n${url}` : ""}`,
+        message:
+          `${m.glyph} Called ${call?.symbol} ${call?.direction?.toUpperCase()} on Streakr — ${m.label}!` +
+          ` 🔥 streak: ${call?.streakAfter ?? "?"}${url ? `\n${url}` : ""}`,
         url: url ?? undefined,
       });
     } catch (e) {
@@ -76,126 +74,119 @@ export default function ResultScreen({ route, navigation }: Props) {
   };
 
   return (
-    <Screen glow="none">
-      <LinearGradient
-        colors={[status === "won" ? "rgba(47,212,122,0.18)" : status === "lost" ? "rgba(255,84,112,0.14)" : "rgba(124,92,255,0.14)", "transparent"]}
-        style={styles.ambientGlow}
-      />
-      <View style={styles.container}>
+    <Screen glow={status === "lost" ? "down" : "accent"}>
+      <View style={styles.root}>
         {!call ? (
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={colors.accent} />
         ) : (
           <>
-            <Animated.View style={pulseStyle} entering={ZoomIn.duration(500).springify()}>
-              <LinearGradient colors={meta.gradient} style={styles.emojiCircle}>
-                <Text style={styles.emoji}>{meta.emoji}</Text>
+            <Animated.View style={pulseStyle} entering={ZoomIn.duration(460).springify()}>
+              <LinearGradient colors={m.grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.disc}>
+                <Text style={[styles.discGlyph, { color: m.ink }]}>{m.glyph}</Text>
               </LinearGradient>
             </Animated.View>
 
-            <Animated.Text entering={FadeInDown.delay(150).duration(400)} style={[styles.statusText, { color: meta.color }]}>
-              {meta.label}
+            <Animated.Text entering={FadeInDown.delay(130).duration(360)} style={[styles.status, { color: m.tint }]}>
+              {m.label}
             </Animated.Text>
-            <Animated.Text entering={FadeInDown.delay(200).duration(400)} style={styles.detail}>
+            <Animated.Text entering={FadeInDown.delay(180).duration(360)} style={styles.detail}>
               {call.symbol} {call.direction.toUpperCase()} · {call.window}
             </Animated.Text>
 
             {status === "pending" ? (
-              <Animated.Text entering={FadeIn.delay(300)} style={styles.pendingNote}>
-                Your call is on-chain — this updates automatically the moment the window settles.
-              </Animated.Text>
+              <Animated.View entering={FadeIn.delay(260)} style={styles.pendWrap}>
+                <Text style={styles.pend}>
+                  Your call is on-chain. This screen updates itself the moment the window settles.
+                </Text>
+              </Animated.View>
             ) : (
-              <Animated.View entering={FadeInDown.delay(300).duration(450).springify()} style={{ width: "100%" }}>
-                <Card style={styles.statsCard}>
+              <Animated.View entering={FadeInDown.delay(260).duration(420).springify()} style={{ width: "100%" }}>
+                <Card tone="paper" padded={20} elevated style={{ alignItems: "center" }}>
+                  <Text style={styles.streakK}>Current streak</Text>
                   <View style={styles.streakRow}>
-                    <Text style={styles.streakEmoji}>🔥</Text>
-                    <Text style={styles.streakValue}>{call.streakAfter ?? 0}</Text>
+                    <Text style={styles.streakV}>{call.streakAfter ?? 0}</Text>
+                    <Text style={styles.streakF}>🔥</Text>
                   </View>
-                  <Text style={styles.streakLabel}>current streak</Text>
 
-                  <View style={styles.metaRow}>
+                  <View style={styles.pills}>
                     {typeof call.payout === "number" && call.payout > 0 ? (
-                      <View style={styles.metaChip}>
-                        <Text style={styles.metaChipLabel}>Payout</Text>
-                        <Text style={[styles.metaChipValue, { color: colors.up }]}>+{call.payout.toFixed(2)}</Text>
-                      </View>
+                      <Stat label="Payout" value={`+${call.payout.toFixed(2)}`} tint={colors.accentDeep} />
                     ) : null}
-                    {call.xpAwarded ? (
-                      <View style={styles.metaChip}>
-                        <Text style={styles.metaChipLabel}>XP</Text>
-                        <Text style={[styles.metaChipValue, { color: colors.gold }]}>+{call.xpAwarded}</Text>
-                      </View>
-                    ) : null}
+                    {call.xpAwarded ? <Stat label="XP" value={`+${call.xpAwarded}`} tint={colors.paperInk} /> : null}
                   </View>
 
-                  {call.badgesAwarded && call.badgesAwarded.length > 0 ? (
-                    <View style={styles.badgeRow}>
-                      <Text style={styles.badgeText}>🏅 New badge: {call.badgesAwarded.join(", ")}</Text>
+                  {call.badgesAwarded?.length ? (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeT}>🏅 New badge · {call.badgesAwarded.join(", ")}</Text>
                     </View>
                   ) : null}
                 </Card>
 
-                <GradientButton
+                <PillButton
                   label="Share Result Card"
-                  onPress={handleShare}
+                  icon="↗"
+                  onPress={share}
                   size="lg"
+                  full
                   style={{ marginTop: spacing(4) }}
-                  glow={colors.primaryGlow}
                 />
               </Animated.View>
             )}
 
-            <Pressable onPress={() => Alert.alert("Transaction", explorerTxUrl(call.txHash))} style={styles.txLinkWrap}>
-              <Text style={styles.txLink}>View on-chain transaction ↗</Text>
+            <Pressable onPress={() => Linking.openURL(explorerTxUrl(call.txHash))} style={styles.txWrap}>
+              <Text style={styles.tx}>View on-chain transaction ↗</Text>
             </Pressable>
           </>
         )}
       </View>
 
       <Pressable
-        style={styles.doneButton}
+        style={styles.done}
         onPress={() => navigation.reset({ index: 0, routes: [{ name: "Room", params: { roomId } }] })}
       >
-        <Text style={styles.doneButtonText}>Back to Room</Text>
+        <Text style={styles.doneT}>Back to room</Text>
       </Pressable>
     </Screen>
   );
 }
 
+function Stat({ label, value, tint }: { label: string; value: string; tint: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statL}>{label}</Text>
+      <Text style={[styles.statV, { color: tint }]}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  ambientGlow: { position: "absolute", top: 0, left: 0, right: 0, height: 400 },
-  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing(6), gap: spacing(2) },
-  emojiCircle: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing(2),
+  root: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing(6), gap: spacing(2) },
+  disc: { width: 104, height: 104, borderRadius: 52, alignItems: "center", justifyContent: "center", marginBottom: spacing(3) },
+  discGlyph: { fontSize: 46 },
+  status: { fontSize: 25, fontWeight: "900", letterSpacing: 0.4 },
+  detail: { ...font.body, color: colors.textMuted, marginTop: 1 },
+  pendWrap: { marginTop: spacing(4), maxWidth: 290 },
+  pend: { ...font.bodySm, color: colors.textFaint, textAlign: "center", lineHeight: 19 },
+
+  streakK: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
+  streakRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
+  streakV: { fontSize: 58, fontWeight: "900", color: colors.paperInk, letterSpacing: -2.5 },
+  streakF: { fontSize: 28 },
+  pills: { flexDirection: "row", gap: spacing(3), marginTop: spacing(4) },
+  stat: {
+    backgroundColor: "rgba(10,11,12,0.05)", borderRadius: radius.md,
+    paddingVertical: spacing(2.5), paddingHorizontal: spacing(4.5), alignItems: "center", minWidth: 96,
   },
-  emoji: { fontSize: 52 },
-  statusText: { fontSize: 26, fontWeight: "900", letterSpacing: 0.5 },
-  detail: { ...font.body, color: colors.textMuted, marginTop: 2 },
-  pendingNote: { color: colors.textFaint, textAlign: "center", marginTop: spacing(3), fontSize: 13, lineHeight: 19, maxWidth: 280 },
-  statsCard: { alignItems: "center", marginTop: spacing(5), width: "100%" },
-  streakRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  streakEmoji: { fontSize: 34 },
-  streakValue: { fontSize: 52, fontWeight: "900", color: colors.text },
-  streakLabel: { ...font.caption, color: colors.textFaint, textTransform: "uppercase", marginTop: -4 },
-  metaRow: { flexDirection: "row", gap: spacing(3), marginTop: spacing(4) },
-  metaChip: {
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
-    paddingVertical: spacing(2),
-    paddingHorizontal: spacing(4),
-    alignItems: "center",
-    minWidth: 90,
+  statL: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
+  statV: { fontSize: 18, fontWeight: "900", marginTop: 2 },
+  badge: {
+    marginTop: spacing(4), backgroundColor: colors.accentSoft,
+    paddingHorizontal: spacing(3.5), paddingVertical: spacing(2), borderRadius: radius.pill,
   },
-  metaChipLabel: { ...font.caption, color: colors.textFaint, textTransform: "uppercase" },
-  metaChipValue: { fontSize: 18, fontWeight: "800", marginTop: 2 },
-  badgeRow: { marginTop: spacing(4) },
-  badgeText: { color: colors.text, fontSize: 13, fontWeight: "600" },
-  txLinkWrap: { marginTop: spacing(5) },
-  txLink: { color: colors.primary, fontSize: 13, fontWeight: "600" },
-  doneButton: { alignItems: "center", padding: spacing(5) },
-  doneButtonText: { color: colors.textFaint, fontWeight: "600" },
+  badgeT: { fontSize: 12.5, fontWeight: "800", color: colors.accentDeep },
+
+  txWrap: { marginTop: spacing(5) },
+  tx: { ...font.bodySm, color: colors.accent, fontWeight: "700" },
+  done: { alignItems: "center", padding: spacing(5) },
+  doneT: { ...font.body, color: colors.textFaint, fontWeight: "700" },
 });
