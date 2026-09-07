@@ -41,7 +41,11 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .expo node_modules/.cache",
+    "build:web": "npm run clean && expo export --platform web --clear && node scripts/relocate-vendor-assets.mjs dist",
+    "postbuild:web": "node scripts/verify-web-build.mjs dist"
   },
   "private": true
 }
