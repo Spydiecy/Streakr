@@ -29,6 +29,7 @@ no mocked settlements, anywhere in this codebase.
 - [Setup](#setup)
 - [Testing a full call cycle](#testing-a-full-call-cycle)
 - [Verified on-chain](#verified-on-chain)
+- [Demo walkthrough](DEMO.md) → shot-by-shot script, plus what to check first
 - [DreamDEX SDK feedback](#dreamdex-sdk--docs-feedback) → full write-up in [`FEEDBACK.md`](FEEDBACK.md)
 - [Deliverables checklist](#deliverables-checklist)
 
@@ -36,10 +37,14 @@ no mocked settlements, anywhere in this codebase.
 
 ## What it is
 
-DreamDEX Event Contracts let anyone pick BTC or ETH, choose a 15-minute or
-1-hour window, and call **Up** or **Down**. Right, and you get a fixed
-payout. Wrong, and you lose exactly your stake — nothing more, no margin
-call, no liquidation.
+DreamDEX Event Contracts let anyone pick BTC or ETH, choose a window, and call
+**Up** or **Down**. Right, and the position redeems at a fixed payout. Wrong, and
+you lose exactly your stake — nothing more, no margin call, no liquidation.
+
+Streakr offers whichever of 15m / 1h / 4h / 1d the venue is actually running,
+read from live markets rather than hard-coded, because the venue rotates its
+cadences and a fixed list shows the user an empty screen through no fault of
+their own.
 
 Streakr wraps that primitive in a social layer:
 
@@ -51,7 +56,8 @@ Streakr wraps that primitive in a social layer:
 | 🔥 **Streaks** | Consecutive correct calls build a streak; one loss resets it to zero |
 | ⭐ **XP & badges** | First Call, 3/5/10-streak, and Room Champion badges, all server-verified |
 | 🏆 **Leaderboards** | Per-room and global, ranked by streak then XP, live via Firestore listeners |
-| 🧾 **Explained results** | Each settled call says what actually happened — "Closed Down — you called Up · −5.00 tUSDC" — derived from the resolved leg, not just a WON/LOST badge |
+| 🧾 **Explained results** | Each settled call says what actually happened — "Closed Up — won 16.67 tUSDC (+11.67 profit)" — with the resolved leg derived from the verdict and the amount valued from the on-chain share count |
+| 🔔 **Telegram** | Every settlement posts to the room's group chat with the streak and a link to the transaction, so a result is verifiable rather than asserted |
 | 🖼️ **Result Cards** | A shareable SVG generated the moment a call settles — the viral loop |
 | 🤖 **Momentum read** | One plain sentence phrased by Mistral `ministral-8b` from real recent window outcomes, labelled "AI take, not advice". The signal is the substance; the model only does wording, and falls back to a deterministic template on any failure so a third party can't break the room card |
 | 🚰 **Zero-setup onboarding** | A new wallet is granted testnet gas + collateral server-side, so a visitor can place a real call in under a minute |
@@ -280,8 +286,8 @@ Streakr/
 │   │   │   ├── networkConfig.ts     leaf module: network + collateral decimals
 │   │   │   ├── WalletProvider.tsx   native: embedded wallet
 │   │   │   └── WalletProvider.web.tsx  web: RainbowKit + demo fallback
-│   │   ├── screens/       Onboarding, RoomList, Room, CallConfirm, Result, Profile, Leaderboard
-│   │   └── components/    design-system primitives (Card, PillButton, Countdown, Chip, …)
+│   │   ├── screens/       Onboarding, RoomList, Room, Result, Profile, Leaderboard
+│   │   └── components/    CallSheet (confirm in place) + design-system primitives
 │   ├── e2e/               headless-Chrome checks against the real build + chain
 │   └── scripts/           icon generation, build gates (asset relocation, env verify)
 │
@@ -575,7 +581,7 @@ In the Firebase console:
 ```bash
 cd backend/lambda
 npm install
-npm run test        # 10 unit tests on streak/XP/badge logic
+npm run test        # 20 unit tests: streak/XP/badge logic + Telegram formatting
 npm run package      # bundles + zips all 5 handlers into deploy/*.zip
 ```
 
@@ -608,7 +614,7 @@ cp .env.example .env    # Firebase config + the 3 Lambda Function URLs
 npm run web              # fastest for a demo
 
 npm run typecheck        # tsc --noEmit
-npm run test             # 25 unit tests (error mapping, call outcomes)
+npm run test             # 41 unit tests: error mapping, call outcomes, quote maths
 npm run build:web        # clean export + asset relocation + build gates
 ```
 
@@ -642,6 +648,19 @@ node scripts/generate-icons.mjs
 There are **two independent paths**, and they compose — set either, or both.
 Neither is required: settlement, streaks, XP and leaderboards work regardless.
 
+Two notifications exist, and they are **not** delivered the same way:
+
+| Notification | When | Status |
+|---|---|---|
+| **Settlement** — "X called BTC UP and won 16.67" | a call resolves on-chain | **live**, posted by the poller |
+| **Pre-lock nudge** — "your window locks in 2 minutes" | 0–120s before a window closes | **needs n8n running** — see B |
+
+The nudge is different because `streakr-pre-lock-nudge` is only a *read* endpoint:
+it answers "which rooms are about to lock?" and sends nothing itself. Something
+has to both call it on a schedule and post the result, which is n8n's job. With
+n8n down, nobody asks, so no nudges go out. Settlement notifications are
+unaffected.
+
 **A · Direct from the Lambda** *(live)*
 
 The poller posts the outcome straight to the Bot API. No hosting, nothing to keep
@@ -661,7 +680,7 @@ Message text is built in `src/telegram.ts` and covered by 10 unit tests — most
 around MarkdownV2 escaping, since a single unescaped `.` or `_` makes Telegram
 reject the whole send, and display names and badge keys are full of them.
 
-**B · Via n8n** *(workflows importable; needs a reachable n8n)*
+**B · Via n8n** *(workflows import and run; no instance currently hosted)*
 
 Richer if you want to branch or add steps. Import without touching the UI:
 
@@ -688,8 +707,15 @@ before choosing where to host:
 
 `n8n start --tunnel` was removed in n8n 2.x, so exposing the webhook now means
 hosting n8n somewhere reachable (n8n Cloud, or Docker on a small box) rather than
-tunnelling from a laptop. Path A exists precisely so notifications don't depend
-on that.
+tunnelling from a laptop. A notification that only works while a laptop is awake
+isn't a working feature, which is why the settlement path was moved into the
+always-on Lambda and n8n's copy of it is redundant. Its one unique contribution
+is the nudge.
+
+Both workflows were verified working: imported via CLI, credentialed, activated,
+and recorded `success` executions against the live bot. Making the nudge always-on
+without n8n would mean an EventBridge rule plus letting the nudge Lambda post
+directly — the same shape as path A.
 
 ## Testing a full call cycle
 
@@ -743,14 +769,27 @@ production instead.
 
 Every call below was signed, submitted and settled for real on Shannon testnet.
 
-**Through the app** (end-to-end: funded wallet → live market → signed order →
-poller-observed settlement → XP and leaderboard written):
+**Through the app** — 13 calls settled, 9 won and 4 lost, each one a real signed
+transaction valued from its real on-chain resolution. A representative win, with
+every figure read back out of Firestore after the poller settled it:
 
-| Call | Window | Result | Recorded |
-|---|---|---|---|
-| BTC **UP** | 15m | ✅ **WIN** | streak 1, 22 XP, First Call + Room Champion badges |
-| BTC **UP** | 15m | ❌ **LOSS** | streak reset to 0, XP still awarded |
-| BTC **DOWN** | 1h | ❌ **LOSS** | payout 0 — capped exactly at stake |
+| Field | Value |
+|---|---|
+| Call | BTC **UP**, 15m window |
+| Staked | 5.00 tUSDC |
+| Filled | 16.666 shares at **0.300** entry (a 27% implied chance) |
+| Resolved | Up — the called direction |
+| Payout | **16.666 tUSDC** → +11.666 profit |
+| Written | streak 1, +20 XP, `first_call` badge, room + global leaderboard |
+| Notified | posted to the room's Telegram with the tx link |
+
+That payout is the whole point of the share count: a winning outcome token
+redeems for ~1 collateral, so `5.00 / 0.300 = 16.67`. An earlier version computed
+the payout from the stake instead and reported **5.00** on that same call, making
+every win look like break-even.
+
+A loss resets the streak to zero while still awarding XP, and the loss is exactly
+the stake — showing that honestly matters more than hiding it.
 
 **Through the CLI**, during Phase 1 chain integration:
 
@@ -764,9 +803,11 @@ by `scripts/watch-settlement.ts`. The in-app calls were settled by
 `streakr-poll-pending-calls` reading on-chain `MarketStatus` on its 60-second
 schedule, which is the same path any user's call takes.
 
-A loss resetting the streak to zero while still awarding XP is deliberate: the
-downside is capped at the stake, and showing that honestly matters more than
-hiding it.
+The share count used to value a settled call is read **from chain** at settlement
+(the wallet's ERC-6909 balance on the called leg), not taken from the call
+document — otherwise a client could report any fill it liked and inflate the
+payout shown in a shared room feed. The recorded value is only a fallback if that
+read fails.
 
 ## DreamDEX SDK & docs feedback
 
@@ -810,9 +851,10 @@ A few of the docs-level points, in brief:
 - [x] Real DreamDEX Event Contracts integration, social/gamified UX, AI feature
 - [x] Full call cycle verified in-app: fund → call → on-chain → settle → streak
 - [x] Developer feedback — [`FEEDBACK.md`](FEEDBACK.md)
-- [x] Tests — 25 app unit tests, 10 backend unit tests, 7 browser checks
-- [x] Telegram notifications — live from the settlement poller; n8n workflows
-      importable as a second path (its webhook needs n8n hosted publicly)
+- [x] Tests — 41 app unit tests, 20 backend unit tests, 7 browser checks
+- [x] Telegram settlement notifications — live from the poller
+- [x] Demo walkthrough — [`DEMO.md`](DEMO.md)
+- [ ] Pre-lock nudge — workflow built and verified, but needs n8n hosted to run
 
 ---
 

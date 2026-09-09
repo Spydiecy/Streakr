@@ -18,7 +18,7 @@ somewhere else.**
 Sections:
 
 1. [Blockers](#1-blockers) — stopped the product working for end users
-2. [Correctness traps](#2-correctness-traps) — code that looks right and silently isn't
+2. [Correctness traps](#2-correctness-traps) — code that looks right and silently isn't (9 findings)
 3. [Discoverability](#3-discoverability) — right answer exists, hard to find
 4. [Ecosystem](#4-ecosystem-liquidity) — liquidity
 5. [Suggested fixes, ranked](#5-suggested-fixes-ranked)
@@ -176,7 +176,32 @@ to make and gives no feedback when made.
 
 ---
 
-### 2.3 A reverted receipt still resolves successfully
+### 2.3 `estPayoutFor`'s `amount` is outcome tokens, and passing collateral fails silently
+
+`estPayoutFor({ amount })` expects **outcome tokens**, not collateral. Pass the
+stake instead of the share count and it returns approximately the stake — because
+a winning share redeems for ~1 collateral, so `payout ≈ shares`, and
+`shares ≈ stake` only when the price is ~1.0.
+
+The result is a plausible-looking number that is wrong by exactly the payout
+multiple. In our case every winning call reported a payout equal to its stake, so
+wins rendered as break-even for a while before anyone noticed — a $5 call that
+actually returned $16.67 reported $5.00.
+
+Nothing catches this: no type distinguishes collateral units from token units
+(both are `bigint` at the same decimals), and the output is in range.
+
+The doc comment on `estimatePayout` in `ec-core` does say "raw outcome-token
+units", which is how we eventually found it. The unit is just very easy to get
+wrong at a call site where the surrounding variables are all collateral amounts.
+
+**Suggested fix:** brand the two units in the type system, or name the parameter
+`shares` / `outcomeTokenAmount` rather than `amount`. A branded type would make
+this class of mistake unrepresentable.
+
+---
+
+### 2.4 A reverted receipt still resolves successfully
 
 `placeOrder` resolves rather than throwing when the receipt status is `reverted`.
 A failed call therefore looks like a successful one unless the caller explicitly
@@ -195,7 +220,7 @@ discriminated result so the failure can't be ignored by omission.
 
 ---
 
-### 2.4 `loadMarkets()` is slow *and* hides live markets
+### 2.5 `loadMarkets()` is slow *and* hides live markets
 
 Measured with `chain-integration/scripts/profile-market-reads.ts`:
 
@@ -216,7 +241,7 @@ entry point and is the wrong one for this use case.
 
 ---
 
-### 2.5 Lot grid: documented default is wrong for the live venue
+### 2.6 Lot grid: documented default is wrong for the live venue
 
 `packages/ec-core/src/config.ts` documents testnet as having "no lot constraint in
 practice" (`MM_LOT=1`). Measured against the live Shannon venue, every order at
@@ -235,7 +260,7 @@ default `MM_LOT` to the observed venue value.
 
 ---
 
-### 2.6 Price feed timeframes are undocumented and fail at runtime
+### 2.7 Price feed timeframes are undocumented and fail at runtime
 
 `fetchPriceOHLCV` accepts only `1m`, `1h`, `1d`. Passing `"5m"` — a completely
 ordinary candle interval — throws *"unknown price timeframe"* at runtime. We had
@@ -249,7 +274,7 @@ state the mainnet gap in the docs.
 
 ---
 
-### 2.7 `venueId` moves, and nothing warns you
+### 2.8 `venueId` moves, and nothing warns you
 
 Venue IDs changed three times in the first week of August. Markets from every
 venue sit side by side in the indexer, so a stale `venueId` returns **zero rows**
@@ -263,7 +288,7 @@ market row rather than trusting this file" in our own `.env`.
 
 ---
 
-### 2.8 Settlement is invisible, and winnings don't arrive
+### 2.9 Settlement is invisible, and winnings don't arrive
 
 Two related behaviours that are correct but easy to miss:
 
@@ -384,8 +409,11 @@ If only a few of these are actioned, we'd argue for this order:
 5. **Expose a snapped `cadence`.** (2.1) Removes a whole class of silent
    market-dropping.
 6. **One browser-wallet example.** (3.2) Unblocks every consumer app.
-7. **Throw on reverted receipts.** (2.3) Prevents recording failed transactions as
+7. **Throw on reverted receipts.** (2.4) Prevents recording failed transactions as
    successful.
+8. **Brand collateral units apart from outcome-token units.** (2.3) Confusing them
+   produces a wrong payout that looks entirely plausible, with nothing to catch
+   it — the two are the same primitive type at the same decimals.
 
 ---
 
