@@ -51,7 +51,7 @@ Streakr wraps that primitive in a social layer:
 | ⭐ **XP & badges** | First Call, 3/5/10-streak, and Room Champion badges, all server-verified |
 | 🏆 **Leaderboards** | Per-room and global, ranked by streak then XP, live via Firestore listeners |
 | 🖼️ **Result Cards** | A shareable image generated the moment a call settles — the viral loop |
-| 🤖 **AI sentiment** | One plain-English sentence on recent momentum, clearly labeled "AI take, not advice" — informational only, never places a trade |
+| 🤖 **Momentum read** | One plain-English sentence built from real recent window outcomes, labelled "AI take, not advice" — informational only, never places a trade. Ships with a deterministic template; set `LLM_API_KEY` on the sentiment Lambda for LLM phrasing of the same data |
 
 ## Architecture
 
@@ -247,10 +247,11 @@ Streakr/
 │   └── lambda/                    AWS Lambda handlers (NOT Cloud Functions)
 │       ├── src/handlers/
 │       │   ├── pollPendingCalls.ts      settlement sweep, every 1 min (EventBridge)
-│       │   ├── sentiment.ts             AI momentum one-liner
+│       │   ├── faucet.ts                grants a new wallet gas + collateral
+│       │   ├── sentiment.ts             momentum one-liner
 │       │   ├── renderResultCard.ts      SVG share-card generator
 │       │   └── preLockNudge.ts          "2 min to lock" data for n8n
-│       └── DEPLOY.md              manual AWS console deploy walkthrough
+│       └── DEPLOY.md              AWS CLI deploy walkthrough, per function
 │
 ├── app/                  Expo (React Native) — the actual product
 │   └── src/
@@ -395,7 +396,16 @@ cp .env.example .env    # fill in Firebase config + the 2 Lambda Function URLs
 npm run web              # fastest for a demo
 ```
 
-### 5 · n8n *(optional)*
+### 5 · n8n *(not deployed)*
+
+> The two workflows below are exported and wired to a live endpoint
+> (`streakr-pre-lock-nudge`), but **no n8n instance is currently running**, and
+> `N8N_SETTLEMENT_WEBHOOK_URL` is deliberately unset on the settlement poller.
+> Settlement, streaks, XP and leaderboards all work without it — the poller logs
+> a warning and continues. What's missing is only the Telegram ping. The
+> architecture diagram above shows this path; treat it as designed and endpointed
+> rather than live.
+
 
 Import both files in `n8n-workflows/` into an n8n instance — each has a
 `notes` field listing exactly which credentials/env vars it needs. Without
