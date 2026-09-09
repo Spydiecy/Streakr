@@ -5,7 +5,7 @@ import type { RootStackParamList } from "./types";
 import OnboardingScreen from "../screens/OnboardingScreen";
 import RoomListScreen from "../screens/RoomListScreen";
 import RoomScreen from "../screens/RoomScreen";
-import CallConfirmScreen from "../screens/CallConfirmScreen";
+
 import ResultScreen from "../screens/ResultScreen";
 import ProfileScreen from "../screens/ProfileScreen";
 import GlobalLeaderboardScreen from "../screens/GlobalLeaderboardScreen";
@@ -45,11 +45,6 @@ export default function RootNavigator() {
         <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ animation: "fade" }} />
         <Stack.Screen name="RoomList" component={RoomListScreen} options={{ animation: "fade" }} />
         <Stack.Screen name="Room" component={RoomScreen} />
-        <Stack.Screen
-          name="CallConfirm"
-          component={CallConfirmScreen}
-          options={{ presentation: "modal", animation: "slide_from_bottom" }}
-        />
         <Stack.Screen name="Result" component={ResultScreen} options={{ animation: "fade" }} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="GlobalLeaderboard" component={GlobalLeaderboardScreen} />

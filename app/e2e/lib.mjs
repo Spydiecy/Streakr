@@ -69,7 +69,10 @@ export function tapBigButton(page, label, minHeight = 40, minWidth = 80) {
     ({ label, minHeight, minWidth }) => {
       const c = Array.from(document.querySelectorAll("*")).filter((e) => {
         if (e.closest('[aria-hidden="true"]')) return false;
-        if (!new RegExp(`(^|\\n)${label}$`).test((e.innerText || "").trim())) return false;
+        // Match the label as its own LINE, not as the whole text: the call
+        // buttons carry an icon glyph before it and a payout line after
+        // ("\uF10C\nDOWN\nwin 13.26"), so anchoring to the end finds nothing.
+        if (!new RegExp(`(^|\\n)${label}(\\n|$)`).test((e.innerText || "").trim())) return false;
         const r = e.getBoundingClientRect();
         return r.height >= minHeight && r.width >= minWidth;
       });

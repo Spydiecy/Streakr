@@ -14,12 +14,20 @@ import {
   subscribeRoomCalls,
   setRoomActiveMarket,
   fetchDisplayNames,
+  recordCall,
 } from "../lib/firestoreApi";
-import { listLiveMarkets, availableWindows, type LiveMarketInfo } from "../lib/eventContracts";
+import {
+  listLiveMarkets,
+  availableWindows,
+  askFor,
+  quoteFor,
+  type LiveMarketInfo,
+} from "../lib/eventContracts";
+import { CallSheet } from "../components/CallSheet";
 import { friendlyErrorLine } from "../lib/errors";
 import { reportFirestoreError, reportFirestoreOk } from "../lib/firestoreHealth";
 import { fetchSentiment } from "../lib/sentimentApi";
-import type { CallDoc, LeaderboardEntryDoc, RoomDoc, Symbol_, WindowLength } from "../lib/types";
+import type { CallDoc, Direction, LeaderboardEntryDoc, RoomDoc, Symbol_, WindowLength } from "../lib/types";
 import { Countdown } from "../components/Countdown";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
@@ -58,6 +66,12 @@ export default function RoomScreen({ route, navigation }: Props) {
   // truthful once a read for the *current* asset has actually finished;
   // without this the empty state flashes for a frame on every toggle.
   const [loadedFor, setLoadedFor] = useState<Symbol_ | null>(null);
+  /** Which direction is awaiting confirmation in the sheet, if any. */
+  const [pending, setPending] = useState<Direction | null>(null);
+  // The sheet clears `pending` before onPlaced runs, so hold the direction
+  // separately for the record write.
+  const pendingRef = useRef<Direction | null>(null);
+  useEffect(() => { if (pending) pendingRef.current = pending; }, [pending]);
   const [sentiment, setSentiment] = useState<{ text: string; source: string } | null>(null);
   const [stake, setStake] = useState(5);
 
@@ -189,17 +203,48 @@ export default function RoomScreen({ route, navigation }: Props) {
   const closed = !market || market.secondsLeft <= 0;
   const totalSec = market?.intervalSec && market.intervalSec > 0 ? market.intervalSec : 3600;
 
-  const call = (direction: "up" | "down") => {
+  /** Potential return for a side, shown on its button. */
+  const winLabel = (direction: Direction): string | null => {
+    if (!market || closed) return null;
+    const q = quoteFor(market, direction, stake);
+    return q ? `win ${q.payout.toFixed(2)}` : "no bids";
+  };
+
+  const call = (direction: Direction) => {
     if (!market || closed) {
-      // Unreachable in practice — both buttons are disabled while closed, and
-      // the note under them explains why. No Alert here: react-native-web's
-      // Alert is a stub, so on the primary demo surface it would be a silent
-      // no-op rather than a message.
+      // Unreachable in practice — the buttons are disabled while closed, and the
+      // note under them explains why. No Alert here: react-native-web's Alert is
+      // a stub, so on the primary demo surface it would be a silent no-op.
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    navigation.navigate("CallConfirm", { roomId, symbol, window: win, direction, stakeUsdso: stake });
+    setPending(direction);
+  };
+
+  /** Record the call and hand off to the result screen once it's on-chain. */
+  const onPlaced = async (res: { txHash: string; positionId: string; stakeSpent: number }) => {
+    if (!session || !market) return;
+    setPending(null);
+    try {
+      const callId = await recordCall({
+        roomId,
+        uid: session.user.uid,
+        symbol,
+        direction: pendingRef.current ?? "up",
+        window: win,
+        stakeUsdso: res.stakeSpent,
+        txHash: res.txHash,
+        positionId: res.positionId,
+      });
+      navigation.navigate("Result", { callId, roomId });
+    } catch (e) {
+      // The order is already on-chain at this point, so failing to record it is
+      // a bookkeeping problem, not a lost call — surface it without implying the
+      // call didn't happen.
+      setErr(friendlyErrorLine(e));
+      reportFirestoreError(e);
+    }
   };
 
   return (
@@ -274,17 +319,21 @@ export default function RoomScreen({ route, navigation }: Props) {
                   <Chip label={closed ? "Locked" : "Live"} tone={closed ? "neutral" : "up"} icon="live" align="start" />
                   <Text style={styles.marketSym}>{symbol}</Text>
                   <Text style={styles.marketId} numberOfLines={1}>{market.label}</Text>
+                  {/* Implied chance rather than the raw ask. They're the same
+                      number — a 0.82 ask is an 82% implied chance — but a
+                      percentage is immediately readable, whereas "0.821" invites
+                      the question this display kept provoking: why does the
+                      cheaper side pay more? The two won't sum to 100% because
+                      both are ask prices, and the gap is the spread. */}
                   <View style={styles.book}>
                     <View>
-                      <Text style={styles.bookL}>Up</Text>
-                      <Text style={styles.bookV}>{market.yesAsk?.toFixed(3) ?? "—"}</Text>
+                      <Text style={styles.bookL}>Up chance</Text>
+                      <Text style={styles.bookV}>{pct(market.yesAsk)}</Text>
                     </View>
                     <View style={styles.bookSep} />
                     <View>
-                      <Text style={styles.bookL}>Down</Text>
-                      <Text style={styles.bookV}>
-                        {market.yesBid !== undefined ? (1 - market.yesBid).toFixed(3) : "—"}
-                      </Text>
+                      <Text style={styles.bookL}>Down chance</Text>
+                      <Text style={styles.bookV}>{pct(market.noAsk)}</Text>
                     </View>
                   </View>
                 </View>
@@ -324,10 +373,30 @@ export default function RoomScreen({ route, navigation }: Props) {
           })}
         </View>
 
-        {/* Call buttons */}
+        {/* Call buttons — each shows what this stake actually returns if right,
+            which is the number people care about and the one that makes the
+            asymmetry between the two sides self-explanatory. */}
         <View style={styles.calls}>
-          <CallBtn label="UP" arrow="up" grad={colors.gradAccent} ink={colors.upInk} glow={colors.accentGlow} disabled={closed} onPress={() => call("up")} />
-          <CallBtn label="DOWN" arrow="down" grad={colors.gradDown} ink="#fff" glow={colors.downGlow} disabled={closed} onPress={() => call("down")} />
+          <CallBtn
+            label="UP"
+            arrow="up"
+            sub={winLabel("up")}
+            grad={colors.gradAccent}
+            ink={colors.upInk}
+            glow={colors.accentGlow}
+            disabled={closed || !market || askFor(market, "up") === undefined}
+            onPress={() => call("up")}
+          />
+          <CallBtn
+            label="DOWN"
+            arrow="down"
+            sub={winLabel("down")}
+            grad={colors.gradDown}
+            ink="#fff"
+            glow={colors.downGlow}
+            disabled={closed || !market || askFor(market, "down") === undefined}
+            onPress={() => call("down")}
+          />
         </View>
         {closed && market ? <Text style={styles.closedNote}>Waiting for the venue to roll the next window…</Text> : null}
 
@@ -398,14 +467,30 @@ export default function RoomScreen({ route, navigation }: Props) {
           )}
         </Card>
       </ScrollView>
+
+      {/* Confirm in place, over the room — the countdown and book stay visible
+          while the user answers "is this the bet I meant?". */}
+      <CallSheet
+        visible={pending !== null}
+        market={market}
+        direction={pending ?? "up"}
+        stake={stake}
+        onCancel={() => setPending(null)}
+        onPlaced={onPlaced}
+      />
     </Screen>
   );
 }
 
+/** An ask price as an implied percentage chance. */
+function pct(price?: number): string {
+  return price === undefined ? "—" : `${Math.round(price * 100)}%`;
+}
+
 function CallBtn({
-  label, arrow, grad, ink, glow, disabled, onPress,
+  label, arrow, sub, grad, ink, glow, disabled, onPress,
 }: {
-  label: string; arrow: IconName; grad: readonly [string, string];
+  label: string; arrow: IconName; sub?: string | null; grad: readonly [string, string];
   ink: string; glow: string; disabled: boolean; onPress: () => void;
 }) {
   const s = useSharedValue(1);
@@ -423,8 +508,11 @@ function CallBtn({
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         style={styles.callBtn}
       >
-        <Icon name={arrow} size={24} color={disabled ? colors.textFaint : ink} />
+        <Icon name={arrow} size={22} color={disabled ? colors.textFaint : ink} />
         <Text style={[styles.callLabel, { color: disabled ? colors.textFaint : ink }]}>{label}</Text>
+        <Text style={[styles.callSub, { color: disabled ? colors.textFaint : ink }]} numberOfLines={1}>
+          {disabled ? "no liquidity" : (sub ?? " ")}
+        </Text>
       </LinearGradient>
     </AnimatedPressable>
   );
@@ -476,6 +564,7 @@ const styles = StyleSheet.create({
   callWrap: { flex: 1, borderRadius: radius.xl },
   callBtn: { borderRadius: radius.xl, paddingVertical: spacing(6), alignItems: "center", gap: 3 },
   callLabel: { fontWeight: "900", fontSize: 19, letterSpacing: 0.6 },
+  callSub: { fontSize: 11.5, fontWeight: "800", opacity: 0.78, marginTop: 1 },
   closedNote: { ...font.bodySm, color: colors.textFaint, textAlign: "center", marginBottom: spacing(2) },
 
   boardHead: { flexDirection: "row", alignItems: "center", gap: spacing(2), marginTop: spacing(6) },

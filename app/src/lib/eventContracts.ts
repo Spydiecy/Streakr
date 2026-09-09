@@ -87,9 +87,25 @@ export interface LiveMarketInfo {
   window: WindowLength | null;
   intervalSec: number;
   secondsLeft: number;
+  /**
+   * Top of book for each leg, in its OWN price terms.
+   *
+   * `noAsk` is read from `noAsks`, not derived as `1 − yesBid`. Those are
+   * different numbers — one is what someone will sell you the NO leg for, the
+   * other is a reflection of the YES bid across the spread — and `placeCall`
+   * executes against `noAsks`. Deriving it for display meant the price shown was
+   * not the price paid.
+   */
   yesBid?: number;
   yesAsk?: number;
+  noBid?: number;
+  noAsk?: number;
 }
+
+// Leg selection and payout maths live in ./quote — a leaf module with no SDK or
+// react-native imports, so they stay unit-testable. Re-exported here because
+// callers already import market types from this module.
+export { askFor, quoteFor, impliedChance, type Quote, type BookSide } from "./quote";
 
 /**
  * Map a raw `intervalSec` onto one of Streakr's window labels.
@@ -208,12 +224,20 @@ export async function listLiveMarkets(asset?: Symbol_): Promise<LiveMarketInfo[]
         // Book straight off the pool — no symbol lookup, so no registry needed.
         let yesBid: number | undefined;
         let yesAsk: number | undefined;
+        let noBid: number | undefined;
+        let noAsk: number | undefined;
         try {
           const book = await exchange.client.getBinaryOrderBook(onchain.pool);
-          const topBid = book.yesBids[0]?.price;
-          const topAsk = book.yesAsks[0]?.price;
-          if (topBid !== undefined) yesBid = Number(topBid) / one;
-          if (topAsk !== undefined) yesAsk = Number(topAsk) / one;
+          // Read all four sides. Each leg is quoted from its own book so the
+          // price shown matches the price placeCall executes against.
+          const yb = book.yesBids[0]?.price;
+          const ya = book.yesAsks[0]?.price;
+          const nb = book.noBids[0]?.price;
+          const na = book.noAsks[0]?.price;
+          if (yb !== undefined) yesBid = Number(yb) / one;
+          if (ya !== undefined) yesAsk = Number(ya) / one;
+          if (nb !== undefined) noBid = Number(nb) / one;
+          if (na !== undefined) noAsk = Number(na) / one;
         } catch {
           // No resting liquidity yet — leave undefined; the UI shows "—".
         }
@@ -233,6 +257,8 @@ export async function listLiveMarkets(asset?: Symbol_): Promise<LiveMarketInfo[]
           secondsLeft: Number(onchain.expiry) - Math.floor(Date.now() / 1000),
           yesBid,
           yesAsk,
+          noBid,
+          noAsk,
         };
       } catch {
         // One unreadable market shouldn't blank the whole screen.
