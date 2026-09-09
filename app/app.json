@@ -1,17 +1,25 @@
 {
   "expo": {
-    "name": "app",
-    "slug": "app",
+    "name": "Streakr",
+    "slug": "streakr",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "scheme": "streakr",
+    "description": "Call BTC/ETH direction on DreamDEX Event Contracts, build a streak, climb your room's board.",
+    "primaryColor": "#c5f82a",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0b0c"
+    },
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#c5f82a",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -19,7 +27,12 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "Streakr",
+      "shortName": "Streakr",
+      "themeColor": "#c5f82a",
+      "backgroundColor": "#0a0b0c",
+      "description": "Call it. Own the streak."
     },
     "plugins": [
       "expo-secure-store"

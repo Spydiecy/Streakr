@@ -1,9 +1,16 @@
 // sentiment — Lambda Function URL handler. GET ?asset=BTC|ETH
 //
-// AI Sentiment Assistant (Phase 5): computes a simple momentum signal from
-// real BTC/ETH price history and asks an LLM for ONE plain-English sentence.
-// Purely informational — never places or suggests a trade size. Falls back
-// to a template sentence when LLM_API_KEY is unset.
+// Computes a momentum signal from real BTC/ETH price history, then asks an LLM
+// to phrase it as ONE plain sentence. Purely informational — it never places a
+// trade, suggests a size, or predicts a direction.
+//
+// The signal is the substance; the model only does wording. If the LLM is
+// unavailable, misconfigured, or slow, a deterministic template renders the same
+// numbers and the endpoint still succeeds — so the room card cannot break
+// because of a third party.
+//
+// Provider is Mistral by default (OpenAI-compatible shape); override with
+// LLM_BASE_URL / LLM_MODEL.
 
 import { getExchange, getNetwork } from "../chain";
 import { jsonResponse, type LambdaHttpEvent, type LambdaHttpResponse } from "../httpTypes";
@@ -53,15 +60,28 @@ export async function computeMomentum(asset: "BTC" | "ETH", lookback = 4): Promi
 
 function buildPrompt(signal: MomentumSignal): string {
   return (
-    `You are a terse crypto market narrator for a casual prediction game. ` +
-    `Given this data, write EXACTLY ONE short plain-English sentence (max 20 words) ` +
-    `describing recent momentum. No advice, no "should", no emojis, no hedging disclaimers ` +
-    `(the app shows its own disclaimer separately).\n\n` +
+    `Narrate recent crypto momentum for a casual prediction game.\n\n` +
     `Asset: ${signal.asset}\n` +
-    `Of the last ${signal.windowsChecked} windows: ${signal.upCount} closed up, ${signal.downCount} closed down.\n` +
-    `Net change over that span: ${signal.pctChange.toFixed(2)}%.\n\n` +
+    `Last ${signal.windowsChecked} one-hour windows: ${signal.upCount} closed up, ` +
+    `${signal.downCount} closed down.\n` +
+    `Net change across those ${signal.windowsChecked} hours: ${signal.pctChange.toFixed(2)}%.\n\n` +
+    `Rules: exactly ONE sentence, 14 words or fewer. Refer to the span as hours — ` +
+    `never days or weeks. State only what the data shows. No advice, no ` +
+    `prediction, no "should", no emoji, no disclaimer (the app adds its own). ` +
+    `Do not use quotation marks.\n\n` +
     `Sentence:`
   );
+}
+
+/** Strip anything the model added around the sentence we asked for. */
+function tidy(raw: string): string {
+  let s = raw.trim().replace(/^["'`]+|["'`]+$/g, "");
+  // Models occasionally prefix a label despite the instruction.
+  s = s.replace(/^(sentence|answer|output)\s*:\s*/i, "");
+  // Keep the first sentence only.
+  const m = s.match(/^[^.!?]*[.!?]/);
+  if (m) s = m[0];
+  return s.trim();
 }
 
 function templateSentence(signal: MomentumSignal): string {
@@ -76,22 +96,32 @@ export async function getSentimentOneLiner(asset: "BTC" | "ETH"): Promise<{ text
     return { text: templateSentence(signal), source: "template" };
   }
   try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Mistral's chat completions API is OpenAI-shaped, so the request and
+    // response handling are identical; LLM_BASE_URL keeps the provider swappable
+    // without touching this code.
+    const baseUrl = process.env.LLM_BASE_URL ?? "https://api.mistral.ai/v1/chat/completions";
+    const res = await fetch(baseUrl, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: process.env.LLM_MODEL ?? "gpt-4o-mini",
+        model: process.env.LLM_MODEL ?? "ministral-8b-latest",
         messages: [{ role: "user", content: buildPrompt(signal) }],
-        max_tokens: 40,
-        temperature: 0.4,
+        // A single short sentence — capped tight so a chatty model can't turn
+        // the card into a paragraph.
+        max_tokens: 48,
+        temperature: 0.3,
       }),
+      // The room screen waits on this; a slow model shouldn't hold up the card.
+      signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) throw new Error(`LLM call failed: ${res.status}`);
+    if (!res.ok) throw new Error(`LLM call failed: ${res.status} ${(await res.text()).slice(0, 160)}`);
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const text = data.choices?.[0]?.message?.content?.trim();
+    const text = tidy(data.choices?.[0]?.message?.content ?? "");
     if (!text) throw new Error("LLM returned no content");
     return { text, source: "llm" };
   } catch (e) {
+    // Never fail the endpoint over this — the template says the same thing from
+    // the same real data, just less fluently.
     console.error("getSentimentOneLiner: LLM call failed, falling back to template:", e);
     return { text: templateSentence(signal), source: "template" };
   }

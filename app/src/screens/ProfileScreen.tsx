@@ -19,6 +19,7 @@ import { Icon, type IconName } from "../components/ui/Icon";
 import { BADGE_ICONS } from "../lib/badgeIcons";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useCollateralBalance } from "../lib/useCollateralBalance";
+import { callOutcomeLine } from "../lib/callOutcome";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Profile">;
 
@@ -145,15 +146,23 @@ export default function ProfileScreen({ navigation }: Props) {
             <Text style={styles.empty}>No calls yet.</Text>
           ) : (
             calls.map((c, i) => (
-              <View key={c.callId} style={[styles.hrow, i > 0 && styles.hline]}>
+              <View key={c.callId} style={[styles.hrow, i > 0 && styles.hline, { alignItems: "flex-start" }]}>
                 <Icon
                   name={c.direction === "up" ? "up" : "down"}
                   size={16}
                   color={c.direction === "up" ? colors.accent : colors.down}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.hsym}>{c.symbol}</Text>
+                  <Text style={styles.hsym}>
+                    {c.symbol} {c.direction.toUpperCase()}
+                  </Text>
                   <Text style={styles.hwin}>{c.window} · {c.stakeUsdso.toFixed(2)} tUSDC</Text>
+                  {/* Why it went that way. The winning leg isn't stored on the
+                      call, but it's implied: a win means the window closed in
+                      the direction called, a loss means the opposite. Stating it
+                      turns a bare WON/LOST badge into something the user can
+                      actually check against the market. */}
+                  <Text style={styles.houtcome}>{callOutcomeLine(c)}</Text>
                 </View>
                 <Chip
                   label={c.status}
@@ -239,4 +248,5 @@ const styles = StyleSheet.create({
   hline: { borderTopWidth: 1, borderTopColor: colors.border },
   hsym: { color: colors.text, fontWeight: "800", fontSize: 14 },
   hwin: { ...font.bodySm, fontSize: 11.5, color: colors.textFaint, marginTop: 1 },
+  houtcome: { ...font.bodySm, fontSize: 11.5, color: colors.textMuted, marginTop: 3, lineHeight: 15.5 },
 });
