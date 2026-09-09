@@ -34,6 +34,10 @@ export interface RoomDoc {
     window: WindowLength;
     positionMarketId?: string;
   };
+  /** Code a member types as `/link CODE` in a Telegram group. */
+  linkCode?: string;
+  /** The chat this room notifies, written only by telegramWebhook. */
+  telegramChatId?: string | null;
   createdAt: number;
 }
 

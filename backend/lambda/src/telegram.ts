@@ -24,6 +24,19 @@ export function telegramConfigured(): boolean {
   return !!process.env.TELEGRAM_BOT_TOKEN && !!process.env.TELEGRAM_CHAT_ID;
 }
 
+/**
+ * Which chat a room's results go to.
+ *
+ * A room that has linked its own Telegram group (via `/link CODE`, handled by
+ * telegramWebhook) notifies that group. Anything unlinked falls back to
+ * TELEGRAM_CHAT_ID, so a demo works with no setup while real rooms get their own
+ * chat.
+ */
+export async function resolveChatId(roomId: string, lookupRoomChat: (roomId: string) => Promise<string | null>): Promise<string | null> {
+  const linked = await lookupRoomChat(roomId).catch(() => null);
+  return linked ?? process.env.TELEGRAM_CHAT_ID ?? null;
+}
+
 /** Telegram's MarkdownV2 reserves a lot of punctuation; escape it in dynamic text. */
 function esc(s: string): string {
   return String(s).replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
@@ -78,9 +91,13 @@ export function buildTelegramMessage(p: SettlementNotifyPayload): string {
  * Best-effort send. A notification failure must never fail settlement — the call
  * is already resolved on-chain and written to Firestore by this point.
  */
-export async function postSettlementToTelegram(p: SettlementNotifyPayload): Promise<void> {
+export async function postSettlementToTelegram(
+  p: SettlementNotifyPayload,
+  /** The room's own linked chat, when it has one. Falls back to TELEGRAM_CHAT_ID. */
+  roomChatId?: string | null,
+): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const chatId = roomChatId || process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return;
 
   try {

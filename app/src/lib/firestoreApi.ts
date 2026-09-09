@@ -49,6 +49,19 @@ function writeTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
+/**
+ * A short, unambiguous code for linking a Telegram group to a room.
+ *
+ * Alphabet excludes O/0 and I/1 — this gets read off a screen and typed into a
+ * chat, and those are the pairs people get wrong.
+ */
+function makeLinkCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 6; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
+}
+
 export async function createRoom(params: {
   name: string;
   isPublic: boolean;
@@ -66,6 +79,7 @@ export async function createRoom(params: {
         isPublic: params.isPublic,
         memberUids: [params.createdBy],
         createdBy: params.createdBy,
+        linkCode: makeLinkCode(),
         createdAt: Date.now(),
       }),
       12_000,

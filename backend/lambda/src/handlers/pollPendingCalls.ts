@@ -20,7 +20,7 @@ import { applyStreakUpdate, shouldAwardRoomChampion } from "../gamification";
 import { notifySettlement, buildNotifyPayload } from "../n8n";
 import { postSettlementToTelegram } from "../telegram";
 import { buildResultCard } from "../resultCard";
-import type { CallDoc, UserDoc } from "../types";
+import type { CallDoc, RoomDoc, UserDoc } from "../types";
 
 async function settleOneCall(callSnap: admin.firestore.QueryDocumentSnapshot): Promise<boolean> {
   const db = getDb();
@@ -136,12 +136,30 @@ async function settleOneCall(callSnap: admin.firestore.QueryDocumentSnapshot): P
   // route, the Bot API directly for a route with no hosting dependency. Either,
   // both, or neither; settlement never depends on them.
   const notifyPayload = buildNotifyPayload(result.call, result.user, result.xpAwarded, result.newBadges);
-  await Promise.all([notifySettlement(notifyPayload), postSettlementToTelegram(notifyPayload)]);
+  // A room that linked its own Telegram group gets notified there; everything
+  // else falls back to the shared chat, so no setup is required for a demo.
+  const roomChatId = await lookupRoomChat(result.call.roomId);
+  await Promise.all([
+    notifySettlement({ ...notifyPayload, telegramChatId: roomChatId ?? undefined }),
+    postSettlementToTelegram(notifyPayload, roomChatId),
+  ]);
 
   console.log(
     `settled call ${call.callId}: ${verdict} · streak=${result.user.currentStreak} · xp+${result.xpAwarded} · badges+${result.newBadges.join(",") || "none"}`,
   );
   return true;
+}
+
+/** The Telegram chat a room has linked, if any. */
+async function lookupRoomChat(roomId: string): Promise<string | null> {
+  try {
+    const snap = await getDb().collection("rooms").doc(roomId).get();
+    const id = snap.exists ? (snap.data() as RoomDoc).telegramChatId : null;
+    return id ? String(id) : null;
+  } catch (e) {
+    console.error(`lookupRoomChat failed for ${roomId}:`, e);
+    return null;
+  }
 }
 
 /** The wallet that signed a user's calls, for reading their on-chain holdings. */

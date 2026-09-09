@@ -24,6 +24,12 @@ export interface SettlementNotifyPayload {
   txHash: string;
   positionId: string;
   settledAt: number;
+  /**
+   * The room's own linked chat, when it has one. The n8n workflow's Code node
+   * already prefers this over its default, so per-room routing works on that
+   * path too without editing the workflow.
+   */
+  telegramChatId?: string;
 }
 
 /** Best-effort fire-and-forget: a webhook outage must never fail settlement. */

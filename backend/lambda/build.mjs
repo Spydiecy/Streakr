@@ -13,7 +13,7 @@
 import { build } from "esbuild";
 import { mkdirSync } from "node:fs";
 
-const handlers = ["pollPendingCalls", "preLockNudge", "sentiment", "renderResultCard", "faucet"];
+const handlers = ["pollPendingCalls", "preLockNudge", "sentiment", "renderResultCard", "faucet", "telegramWebhook"];
 
 mkdirSync("dist", { recursive: true });
 

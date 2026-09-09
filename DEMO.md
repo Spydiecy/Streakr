@@ -46,12 +46,17 @@ Start already signed in, inside a room, with a live market on screen.
 > "This is Streakr. It's a group chat for market calls — you and your friends call
 > Bitcoin or Ethereum up or down, and your streak is public to the room."
 
-Point at the card: **BTC**, the window chips, the countdown ring, and the two
-implied-chance figures.
+Point at the card: **BTC**, the window chips, the countdown ring, the payout
+multiples, and the price sparkline underneath.
 
 > "Everything here is live from the chain. That countdown is the actual expiry of
-> a real Event Contract on DreamDEX, and those percentages are the current order
-> book."
+> a real Event Contract on DreamDEX, those multiples are the current order book,
+> and the chart is the oracle price feed — the same feed the AI line reads, so
+> they can never disagree."
+
+If the book happens to be one-sided you'll see *"only one side is quoted"* instead
+of a percentage. Worth calling out rather than hiding — it's an honest read of a
+thin market, and most apps would show a meaningless number there.
 
 **Why open here:** two other hackathon submissions pitch "one-tap UP/DOWN with
 streaks". Rooms is the thing neither of them has. Lead with it.
@@ -101,7 +106,11 @@ Go back. Your call is in **Room calls**, marked `LIVE`.
 > for how much, and whether it's still live. That's the part that makes it a
 > group rather than a scoreboard."
 
-Show the room leaderboard beneath it.
+Show the room leaderboard beneath it, then the Telegram link card:
+
+> "And a room can point its results at its own Telegram group — you drop the bot
+> in and send this code."
+
 
 ### 1:40 — While it settles: profile
 
@@ -195,7 +204,7 @@ All verified, all reproducible:
 
 - **9 wins, 4 losses** settled from real on-chain outcomes
 - a real call: **5.00 staked → 16.67 returned** (16.666 shares at 0.300 entry)
-- **41 app unit tests, 20 backend unit tests, 7 browser checks**
+- **51 app unit tests, 20 backend unit tests, 7 browser checks**
 - **5 Lambdas**, settlement polling on a 1-minute schedule
 - an ERC-20 `approve` on Somnia costs **1,389,617 gas** — ~30x EVM intuition
 - `loadMarkets()` **18.06s** vs the targeted query **2.24s**, and the former's

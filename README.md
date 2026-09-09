@@ -57,7 +57,8 @@ Streakr wraps that primitive in a social layer:
 | ⭐ **XP & badges** | First Call, 3/5/10-streak, and Room Champion badges, all server-verified |
 | 🏆 **Leaderboards** | Per-room and global, ranked by streak then XP, live via Firestore listeners |
 | 🧾 **Explained results** | Each settled call says what actually happened — "Closed Up — won 16.67 tUSDC (+11.67 profit)" — with the resolved leg derived from the verdict and the amount valued from the on-chain share count |
-| 🔔 **Telegram** | Every settlement posts to the room's group chat with the streak and a link to the transaction, so a result is verifiable rather than asserted |
+| 📈 **Price chart** | A sparkline of recent closes for the asset being called, sized to the window (minute candles for 15m, hourly for 1d), from the same oracle feed the momentum line reads — so the chart and the AI take can't contradict each other |
+| 🔔 **Telegram** | Every settlement posts to the room's own group chat — linked with `/link CODE` — carrying the streak and a link to the transaction, so a result is verifiable rather than asserted |
 | 🖼️ **Result Cards** | A shareable SVG generated the moment a call settles — the viral loop |
 | 🤖 **Momentum read** | One plain sentence phrased by Mistral `ministral-8b` from real recent window outcomes, labelled "AI take, not advice". The signal is the substance; the model only does wording, and falls back to a deterministic template on any failure so a third party can't break the room card |
 | 🚰 **Zero-setup onboarding** | A new wallet is granted testnet gas + collateral server-side, so a visitor can place a real call in under a minute |
@@ -86,12 +87,13 @@ flowchart TB
         FS[(Firestore<br/>users · rooms · calls · leaderboard)]
     end
 
-    subgraph AWS["☁️ AWS Lambda (5 functions)"]
+    subgraph AWS["☁️ AWS Lambda (6 functions)"]
         Poll["streakr-poll-pending-calls<br/>(EventBridge, every 1 min)"]
         Faucet["streakr-faucet<br/>(Function URL, POST)"]
         Sentiment["streakr-sentiment<br/>(Function URL)"]
         Card["streakr-render-result-card<br/>(Function URL)"]
         Nudge["streakr-pre-lock-nudge<br/>(Function URL)"]
+        TgHook["streakr-telegram-webhook<br/>(Function URL)"]
     end
 
     Mistral(("Mistral<br/>ministral-8b"))
@@ -105,6 +107,7 @@ flowchart TB
 
     Wallet -- "sign & submit call" --> SDK
     UI -- "read live markets/books" --> SDK
+    UI -- "read price history (chart)" --> SDK
     UI -- "read tUSDC balance" --> SDK
     UI <--> Auth
     UI <--> FS
@@ -119,6 +122,8 @@ flowchart TB
     Poll -- "read settlement status" --> SDK
     Poll -- "write streak/XP/badges/leaderboard" --> FS
     Poll -- "post outcome" --> Telegram
+    Telegram -- "/link CODE" --> TgHook
+    TgHook -- "bind chat to room" --> FS
     Poll -. "POST outcome (optional)" .-> Notify
     Notify -.-> Telegram
     NudgeFlow -- "GET rooms closing soon" --> Nudge
@@ -273,7 +278,8 @@ Streakr/
 │       │   ├── faucet.ts                grants a new wallet gas + collateral
 │       │   ├── sentiment.ts             momentum one-liner
 │       │   ├── renderResultCard.ts      SVG share-card generator
-│       │   └── preLockNudge.ts          "2 min to lock" data for n8n
+│       │   ├── preLockNudge.ts          "2 min to lock" data for n8n
+│       │   └── telegramWebhook.ts       /link CODE -> bind a group to a room
 │       └── DEPLOY.md              AWS CLI deploy walkthrough, per function
 │
 ├── app/                  Expo (React Native) — the actual product
@@ -582,10 +588,10 @@ In the Firebase console:
 cd backend/lambda
 npm install
 npm run test        # 20 unit tests: streak/XP/badge logic + Telegram formatting
-npm run package      # bundles + zips all 5 handlers into deploy/*.zip
+npm run package      # bundles + zips all 6 handlers into deploy/*.zip
 ```
 
-Then follow **[`backend/lambda/DEPLOY.md`](backend/lambda/DEPLOY.md)** — the five
+Then follow **[`backend/lambda/DEPLOY.md`](backend/lambda/DEPLOY.md)** — the six
 functions, env vars, the EventBridge schedule, and Function URLs.
 
 | Function | Trigger | Purpose |
@@ -595,6 +601,7 @@ functions, env vars, the EventBridge schedule, and Function URLs.
 | `streakr-sentiment` | Function URL (GET) | momentum signal, phrased by Mistral |
 | `streakr-render-result-card` | Function URL (GET) | shareable SVG for a settled call |
 | `streakr-pre-lock-nudge` | Function URL (GET + secret) | rooms closing soon, for n8n |
+| `streakr-telegram-webhook` | Function URL (POST from Telegram) | `/link CODE` binds a group to a room |
 
 Two optional env vars change behaviour rather than enabling it:
 
@@ -614,7 +621,7 @@ cp .env.example .env    # Firebase config + the 3 Lambda Function URLs
 npm run web              # fastest for a demo
 
 npm run typecheck        # tsc --noEmit
-npm run test             # 41 unit tests: error mapping, call outcomes, quote maths
+npm run test             # 51 unit tests: error mapping, call outcomes, quote/book maths
 npm run build:web        # clean export + asset relocation + build gates
 ```
 
@@ -654,6 +661,36 @@ Two notifications exist, and they are **not** delivered the same way:
 |---|---|---|
 | **Settlement** — "X called BTC UP and won 16.67" | a call resolves on-chain | **live**, posted by the poller |
 | **Pre-lock nudge** — "your window locks in 2 minutes" | 0–120s before a window closes | **needs n8n running** — see B |
+
+### Per-room chats
+
+Each room shows a code (`/link ABC123`). Send it in any Telegram group that has
+`@streak_r_bot` in it, and that room's settled calls post there instead of the
+shared fallback chat. `/unlink` detaches.
+
+`streakr-telegram-webhook` handles it. A webhook rather than polling
+`getUpdates`, because polling needs a scheduler, holds an offset cursor, and
+breaks if anything else consumes the same feed.
+
+Two things it gets right that are easy to miss:
+
+- **Telegram echoes a secret header** (`x-telegram-bot-api-secret-token`), which
+  is checked. Without it, anyone who found the Function URL could forge an update
+  and repoint any room's notifications at a chat they control.
+- **`telegramChatId` is not client-writable.** `firestore.rules` limits client
+  room updates to `name` / `activeMarket` / `isPublic`, so only the webhook (admin
+  SDK) can set it. The `linkCode` is a claim ticket rather than a secret —
+  claiming it only redirects that room's own notifications.
+
+Group messages arrive addressed to the bot (`/link@streak_r_bot abc123`), so the
+command parser handles the mention and is case-insensitive on the code.
+
+```bash
+# One-time registration; Telegram remembers it.
+curl "https://api.telegram.org/bot<token>/setWebhook" -H 'content-type: application/json' \
+  -d '{"url":"<function url>","secret_token":"<secret>","allowed_updates":["message","edited_message","channel_post"]}'
+curl "https://api.telegram.org/bot<token>/getWebhookInfo"   # verify, check last_error_message
+```
 
 The nudge is different because `streakr-pre-lock-nudge` is only a *read* endpoint:
 it answers "which rooms are about to lock?" and sends nothing itself. Something
@@ -851,7 +888,7 @@ A few of the docs-level points, in brief:
 - [x] Real DreamDEX Event Contracts integration, social/gamified UX, AI feature
 - [x] Full call cycle verified in-app: fund → call → on-chain → settle → streak
 - [x] Developer feedback — [`FEEDBACK.md`](FEEDBACK.md)
-- [x] Tests — 41 app unit tests, 20 backend unit tests, 7 browser checks
+- [x] Tests — 51 app unit tests, 20 backend unit tests, 7 browser checks
 - [x] Telegram settlement notifications — live from the poller
 - [x] Demo walkthrough — [`DEMO.md`](DEMO.md)
 - [ ] Pre-lock nudge — workflow built and verified, but needs n8n hosted to run

@@ -45,6 +45,20 @@ export interface RoomDoc {
     window: WindowLength;
     positionMarketId?: string;
   };
+  /**
+   * Short code a member types as `/link CODE` in a Telegram group to point this
+   * room's notifications at that chat. Generated client-side at creation — it's
+   * a claim ticket, not a secret, and claiming it only redirects a room's own
+   * notifications.
+   */
+  linkCode?: string;
+  /**
+   * Telegram chat this room notifies, once linked. Written only by the webhook
+   * Lambda via the admin SDK — firestore.rules restricts client updates to
+   * name/activeMarket/isPublic, so a client cannot point another room's
+   * notifications at a chat it controls.
+   */
+  telegramChatId?: string;
   createdAt: number;
 }
 
