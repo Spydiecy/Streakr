@@ -44,7 +44,18 @@ export interface CallDoc {
   symbol: Symbol_;
   direction: Direction;
   window: WindowLength;
+  /** Collateral actually spent, in tUSDC. */
   stakeUsdso: number;
+  /**
+   * Outcome tokens bought — the quantity that redeems at settlement.
+   *
+   * Required to compute a payout: a winning share redeems for ~1 collateral, so
+   * the payout follows from the SHARE count, not the stake. Optional only because
+   * calls recorded before this field existed don't carry it.
+   */
+  shares?: number;
+  /** Price paid per share, 0–1. Also the implied chance at the time of the call. */
+  entryPrice?: number;
   txHash: string;
   positionId: string;
   status: CallStatus;

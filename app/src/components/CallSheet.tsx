@@ -25,7 +25,13 @@ interface Props {
   stake: number;
   onCancel: () => void;
   /** Called with the on-chain result once the order fills. */
-  onPlaced: (res: { txHash: string; positionId: string; stakeSpent: number }) => void;
+  onPlaced: (res: {
+    txHash: string;
+    positionId: string;
+    stakeSpent: number;
+    filledShares: number;
+    fillPrice: number;
+  }) => void;
 }
 
 /**

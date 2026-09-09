@@ -158,6 +158,10 @@ export interface CreateCallInput {
   direction: CallDoc["direction"];
   window: CallDoc["window"];
   stakeUsdso: number;
+  /** Outcome tokens bought. The settlement payout is computed from this. */
+  shares: number;
+  /** Price paid per share, 0–1. */
+  entryPrice: number;
   txHash: string;
   positionId: string;
 }

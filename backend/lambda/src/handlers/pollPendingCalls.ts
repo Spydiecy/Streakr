@@ -15,7 +15,7 @@
 // in it to read), it just runs the same sweep every time.
 
 import { getDb, admin } from "../firebaseAdmin";
-import { getNetwork, readSettlement, judgeCall, estimatePayoutRaw } from "../chain";
+import { getNetwork, readSettlement, judgeCall, estimatePayoutRaw, readOutcomeBalance } from "../chain";
 import { applyStreakUpdate, shouldAwardRoomChampion } from "../gamification";
 import { notifySettlement, buildNotifyPayload } from "../n8n";
 import { buildResultCard } from "../resultCard";
@@ -31,10 +31,48 @@ async function settleOneCall(callSnap: admin.firestore.QueryDocumentSnapshot): P
   if (verdict === "pending") return false;
 
   const calledLeg = call.direction === "up" ? 0 : 1;
-  const amountRaw = BigInt(Math.round(call.stakeUsdso * 10 ** settlement.onchain.decimals));
-  const payoutRaw =
-    verdict === "won" || verdict === "void" ? estimatePayoutRaw(settlement, calledLeg as 0 | 1, amountRaw) : 0n;
-  const payout = Number(payoutRaw) / 10 ** settlement.onchain.decimals;
+
+  // The amount here is OUTCOME TOKENS, not collateral. A winning share redeems
+  // for ~1 collateral, so the payout follows from how many shares were bought —
+  // stake / price — and not from the stake.
+  //
+  // This previously passed the stake, which made every winning payout come back
+  // equal to the stake: a $5 call that should have returned $21 reported $5, so
+  // wins looked like break-even. `shares` is now recorded at call time.
+  //
+  // Calls written before that field existed can't be valued after the fact (the
+  // fill price isn't recoverable from the document), so they settle with no
+  // payout figure rather than a wrong one. The UI omits the amount when it's
+  // absent instead of printing a number it can't stand behind.
+  const decimals = settlement.onchain.decimals;
+
+  // Read the share count from chain, not from the call document.
+  //
+  // The client records what it believes it filled, but that value drives the
+  // payout shown in a shared room feed, so taking it on trust would let a client
+  // claim any win it liked. The wallet's actual ERC-6909 balance on the called leg
+  // is authoritative, and keeps the "outcomes come from on-chain state, never
+  // self-reported" premise true for the amount as well as the verdict.
+  //
+  // Falls back to the recorded value only if the read fails, and to no figure at
+  // all if neither is available — a missing amount is honest, a wrong one isn't.
+  let sharesRaw: bigint | null = null;
+  try {
+    const holder = await resolveWalletAddress(call.uid);
+    if (holder) sharesRaw = await readOutcomeBalance(network, settlement.onchain, holder, calledLeg as 0 | 1);
+  } catch (e) {
+    console.error(`settleOneCall: outcome balance read failed for ${call.callId}:`, e);
+  }
+  if ((sharesRaw === null || sharesRaw === 0n) && typeof call.shares === "number" && call.shares > 0) {
+    sharesRaw = BigInt(Math.round(call.shares * 10 ** decimals));
+  }
+
+  const payout = (() => {
+    if (verdict === "lost") return 0;
+    if (sharesRaw === null || sharesRaw <= 0n) return undefined;
+    const raw = estimatePayoutRaw(settlement, calledLeg as 0 | 1, sharesRaw);
+    return Number(raw) / 10 ** decimals;
+  })();
 
   const usersRef = db.collection("users").doc(call.uid);
 
@@ -69,7 +107,9 @@ async function settleOneCall(callSnap: admin.firestore.QueryDocumentSnapshot): P
 
     const updatedCall: Partial<CallDoc> = {
       status: verdict,
-      payout,
+      // Omit rather than write undefined — Firestore rejects undefined values,
+      // and an absent field is what the UI checks for.
+      ...(payout !== undefined ? { payout } : {}),
       settledAt: now,
       streakAfter: update.currentStreak,
       xpAwarded: update.xpAwarded,
@@ -97,6 +137,13 @@ async function settleOneCall(callSnap: admin.firestore.QueryDocumentSnapshot): P
     `settled call ${call.callId}: ${verdict} · streak=${result.user.currentStreak} · xp+${result.xpAwarded} · badges+${result.newBadges.join(",") || "none"}`,
   );
   return true;
+}
+
+/** The wallet that signed a user's calls, for reading their on-chain holdings. */
+async function resolveWalletAddress(uid: string): Promise<string | null> {
+  const snap = await getDb().collection("users").doc(uid).get();
+  const addr = snap.exists ? (snap.data() as UserDoc).walletAddress : undefined;
+  return addr && /^0x[0-9a-fA-F]{40}$/.test(addr) ? addr : null;
 }
 
 async function refreshLeaderboards(roomId: string, user: UserDoc): Promise<void> {

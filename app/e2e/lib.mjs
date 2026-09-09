@@ -157,14 +157,21 @@ export function marketCard(page) {
         : label
           ? "market"
           : "other";
-    const quotes = (
-      body.match(/(?:^|\n)(?:UP|Up)\n([\d.—]+)[\s\S]*?(?:DOWN|Down)\n([\d.—]+)/) || []
-    ).slice(1);
+    // The card shows implied chance ("UP CHANCE / 82%"), and each call button
+    // shows the payout for the current stake ("UP / win 21.10") or "no bids" when
+    // that leg is unquoted. Both are read, since "is this side tradable" is the
+    // question most checks actually care about.
+    const chance = (body.match(/UP CHANCE\n([\d]+%|—)[\s\S]*?DOWN CHANCE\n([\d]+%|—)/i) || []).slice(1);
+    const wins = {
+      up: (body.match(/(?:^|\n)UP\n(win [\d.]+|no liquidity|no bids)/) || [])[1] ?? null,
+      down: (body.match(/(?:^|\n)DOWN\n(win [\d.]+|no liquidity|no bids)/) || [])[1] ?? null,
+    };
+    const quotes = chance;
     // Capture the WHOLE countdown: a regex that stops at the minutes silently
     // drops the "17h " prefix and makes every window look near expiry.
     const left = (body.match(/(?:^|\n)([0-9]+[hm]?[: ][0-9]+[hm]?)\nleft/) || [])[1] ?? null;
 
-    return { state, big, label, quotes, left };
+    return { state, big, label, quotes, wins, left };
   });
 }
 

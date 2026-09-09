@@ -24,6 +24,7 @@ import {
   type LiveMarketInfo,
 } from "../lib/eventContracts";
 import { CallSheet } from "../components/CallSheet";
+import { callResultAmount } from "../lib/callOutcome";
 import { friendlyErrorLine } from "../lib/errors";
 import { reportFirestoreError, reportFirestoreOk } from "../lib/firestoreHealth";
 import { fetchSentiment } from "../lib/sentimentApi";
@@ -223,7 +224,13 @@ export default function RoomScreen({ route, navigation }: Props) {
   };
 
   /** Record the call and hand off to the result screen once it's on-chain. */
-  const onPlaced = async (res: { txHash: string; positionId: string; stakeSpent: number }) => {
+  const onPlaced = async (res: {
+    txHash: string;
+    positionId: string;
+    stakeSpent: number;
+    filledShares: number;
+    fillPrice: number;
+  }) => {
     if (!session || !market) return;
     setPending(null);
     try {
@@ -234,6 +241,10 @@ export default function RoomScreen({ route, navigation }: Props) {
         direction: pendingRef.current ?? "up",
         window: win,
         stakeUsdso: res.stakeSpent,
+        // Both are needed at settlement: the payout is shares x (1 - fee), which
+        // cannot be reconstructed from the stake alone.
+        shares: res.filledShares,
+        entryPrice: res.fillPrice,
         txHash: res.txHash,
         positionId: res.positionId,
       });
@@ -412,6 +423,7 @@ export default function RoomScreen({ route, navigation }: Props) {
             calls.slice(0, 12).map((c, i) => {
               const mine = !!session && c.uid === session.user.uid;
               const up = c.direction === "up";
+              const amount = callResultAmount(c);
               return (
                 <View key={c.callId} style={[styles.crow, i > 0 && styles.browLine]}>
                   <Icon
@@ -425,6 +437,11 @@ export default function RoomScreen({ route, navigation }: Props) {
                     </Text>
                     <Text style={styles.cmeta}>
                       {c.symbol} {c.direction.toUpperCase()} · {c.window} · {c.stakeUsdso.toFixed(2)} tUSDC
+                      {/* The result in tUSDC, so the feed shows what a call was
+                          worth and not just that it resolved. */}
+                      {amount ? (
+                        <Text style={c.status === "won" ? styles.cwin : styles.close}>  {amount}</Text>
+                      ) : null}
                     </Text>
                   </View>
                   <Chip
@@ -577,6 +594,8 @@ const styles = StyleSheet.create({
   crow: { flexDirection: "row", alignItems: "center", gap: spacing(3), paddingVertical: spacing(3), paddingHorizontal: spacing(4) },
   cname: { color: colors.text, fontWeight: "800", fontSize: 14 },
   cmeta: { ...font.bodySm, fontSize: 11.5, color: colors.textFaint, marginTop: 1 },
+  cwin: { color: colors.accent, fontWeight: "800" },
+  close: { color: colors.down, fontWeight: "800" },
   brow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing(3), paddingHorizontal: spacing(4), gap: spacing(2.5) },
   browLine: { borderTopWidth: 1, borderTopColor: colors.border },
   rank: {

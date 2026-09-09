@@ -83,6 +83,33 @@ export function getExchange(network: Network): SomniaMarkets {
   return exchange;
 }
 
+/**
+ * How many outcome tokens `account` holds on one leg of a market, raw units.
+ *
+ * This is the authoritative share count for valuing a settled call. The client
+ * reports what it believes it filled, but the payout must not be computed from a
+ * number the client supplies — `shares` drives the figure shown in a shared room
+ * feed, so trusting it would let a client claim any win it liked. Streakr's whole
+ * premise is that outcomes come from on-chain state rather than self-reporting,
+ * and this keeps that true for the amount as well as the verdict.
+ *
+ * Positions are ERC-6909 on a shared outcome-token singleton, so the read is
+ * (outcomeToken, account, id) rather than a plain ERC-20 balance.
+ */
+export async function readOutcomeBalance(
+  network: Network,
+  onchain: MarketOnchain,
+  account: string,
+  leg: 0 | 1,
+): Promise<bigint> {
+  const exchange = getExchange(network);
+  return exchange.client.getOutcomeBalance({
+    outcomeToken: onchain.outcomeToken,
+    account: account as `0x${string}`,
+    id: leg === 0 ? onchain.yesId : onchain.noId,
+  });
+}
+
 export interface SettlementRead {
   status: "trading" | "locked" | "settling" | "resolved" | "voided" | "unknown";
   isResolved: boolean;
