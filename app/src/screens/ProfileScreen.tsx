@@ -18,6 +18,7 @@ import { PillButton } from "../components/ui/PillButton";
 import { Icon, type IconName } from "../components/ui/Icon";
 import { BADGE_ICONS } from "../lib/badgeIcons";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { useCollateralBalance } from "../lib/useCollateralBalance";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Profile">;
 
@@ -27,6 +28,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [calls, setCalls] = useState<CallDoc[]>([]);
   const [copied, setCopied] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const { balance, refresh: refreshBalance } = useCollateralBalance(wallet.address);
 
   useEffect(() => {
     if (!session) return;
@@ -58,7 +60,14 @@ export default function ProfileScreen({ navigation }: Props) {
           <Icon name="back" size={20} color={colors.text} />
         </Pressable>
         <Text style={styles.headTitle}>Profile</Text>
-        <View style={{ width: 40 }} />
+        <Pressable
+          onPress={() => { Haptics.selectionAsync(); refreshBalance(); }}
+          accessibilityLabel="Refresh balance"
+          accessibilityRole="button"
+          style={styles.back}
+        >
+          <Icon name="refresh" size={18} color={colors.textMuted} />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -85,6 +94,14 @@ export default function ProfileScreen({ navigation }: Props) {
                 <Text style={styles.copy}>{copied ? "copied" : "tap to copy"}</Text>
               </View>
             </Pressable>
+
+            {/* Spendable collateral, same read for either wallet kind. */}
+            <View style={styles.balRow}>
+              <Text style={styles.balL}>Balance</Text>
+              <Text style={styles.balV}>
+                {balance === null ? "…" : `${balance.toFixed(2)} tUSDC`}
+              </Text>
+            </View>
 
             <View style={styles.stats}>
               <Stat v={profile?.currentStreak ?? 0} l="Streak" icon="streak" />
@@ -190,6 +207,14 @@ const styles = StyleSheet.create({
   copyRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
   copy: { fontSize: 10.5, fontWeight: "800", color: colors.accentDeep, textTransform: "uppercase" },
 
+  balRow: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    alignSelf: "stretch", marginTop: spacing(4),
+    backgroundColor: "rgba(10,11,12,0.05)", borderRadius: radius.md,
+    paddingVertical: spacing(3), paddingHorizontal: spacing(4),
+  },
+  balL: { ...font.label, color: colors.paperMuted, textTransform: "uppercase" },
+  balV: { fontSize: 15, fontWeight: "900", color: colors.paperInk, fontVariant: ["tabular-nums"] },
   stats: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     marginTop: spacing(5), paddingTop: spacing(4),

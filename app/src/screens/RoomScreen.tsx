@@ -8,12 +8,18 @@ import Animated, {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
-import { subscribeRoom, subscribeLeaderboard, setRoomActiveMarket } from "../lib/firestoreApi";
+import {
+  subscribeRoom,
+  subscribeLeaderboard,
+  subscribeRoomCalls,
+  setRoomActiveMarket,
+  fetchDisplayNames,
+} from "../lib/firestoreApi";
 import { listLiveMarkets, availableWindows, type LiveMarketInfo } from "../lib/eventContracts";
 import { friendlyErrorLine } from "../lib/errors";
 import { reportFirestoreError, reportFirestoreOk } from "../lib/firestoreHealth";
 import { fetchSentiment } from "../lib/sentimentApi";
-import type { LeaderboardEntryDoc, RoomDoc, Symbol_, WindowLength } from "../lib/types";
+import type { CallDoc, LeaderboardEntryDoc, RoomDoc, Symbol_, WindowLength } from "../lib/types";
 import { Countdown } from "../components/Countdown";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
@@ -38,6 +44,8 @@ export default function RoomScreen({ route, navigation }: Props) {
   const { session } = useSession();
   const [room, setRoom] = useState<RoomDoc | null>(null);
   const [board, setBoard] = useState<LeaderboardEntryDoc[]>([]);
+  const [calls, setCalls] = useState<CallDoc[]>([]);
+  const [names, setNames] = useState<Map<string, string>>(new Map());
   const [symbol, setSymbol] = useState<Symbol_>("BTC");
   const [win, setWin] = useState<WindowLength>("1h");
   const [allMarkets, setAllMarkets] = useState<LiveMarketInfo[]>([]);
@@ -55,6 +63,24 @@ export default function RoomScreen({ route, navigation }: Props) {
 
   useEffect(() => subscribeRoom(roomId, setRoom), [roomId]);
   useEffect(() => subscribeLeaderboard(roomId, setBoard), [roomId]);
+
+  // Every call made in this room, pending ones included.
+  //
+  // The room previously showed only the leaderboard, which is written server-side
+  // from SETTLED results — so a call you had just placed appeared nowhere in the
+  // room it belonged to, while showing up fine in your profile. This is the feed
+  // that makes a room feel shared, and it's what the
+  // calls(roomId, createdAt DESC) index exists for.
+  useEffect(() => subscribeRoomCalls(roomId, setCalls), [roomId]);
+
+  // Resolve uid -> display name for the feed; calls carry only a uid.
+  useEffect(() => {
+    const uids = [...new Set(calls.map((c) => c.uid))];
+    if (uids.length === 0) return;
+    let dead = false;
+    fetchDisplayNames(uids).then((m) => !dead && setNames(m));
+    return () => { dead = true; };
+  }, [calls]);
 
   /**
    * Guards against out-of-order market reads.
@@ -187,6 +213,22 @@ export default function RoomScreen({ route, navigation }: Props) {
             <Text style={styles.headKicker}>Room</Text>
             <Text style={styles.headTitle} numberOfLines={1}>{room?.name ?? "…"}</Text>
           </View>
+          {/* Re-read the market on demand, so a stale card doesn't need a page
+              reload. The calls feed and leaderboard are live listeners and don't
+              need prompting. */}
+          <Pressable
+            onPress={() => { Haptics.selectionAsync(); loadMarket(); }}
+            disabled={loading}
+            accessibilityLabel="Refresh market"
+            accessibilityRole="button"
+            style={styles.back}
+          >
+            {loading ? (
+              <ActivityIndicator color={colors.textMuted} size="small" />
+            ) : (
+              <Icon name="refresh" size={18} color={colors.textMuted} />
+            )}
+          </Pressable>
         </View>
 
         <View style={styles.pickers}>
@@ -288,6 +330,51 @@ export default function RoomScreen({ route, navigation }: Props) {
           <CallBtn label="DOWN" arrow="down" grad={colors.gradDown} ink="#fff" glow={colors.downGlow} disabled={closed} onPress={() => call("down")} />
         </View>
         {closed && market ? <Text style={styles.closedNote}>Waiting for the venue to roll the next window…</Text> : null}
+
+        {/* Calls made in this room — pending included, newest first. */}
+        <View style={styles.boardHead}>
+          <Text style={styles.blockLabel}>Room calls</Text>
+          {calls.length > 0 ? <Text style={styles.boardCount}>{calls.length}</Text> : null}
+        </View>
+        <Card padded={false}>
+          {calls.length === 0 ? (
+            <Text style={styles.boardEmpty}>No calls in this room yet. Make the first one.</Text>
+          ) : (
+            calls.slice(0, 12).map((c, i) => {
+              const mine = !!session && c.uid === session.user.uid;
+              const up = c.direction === "up";
+              return (
+                <View key={c.callId} style={[styles.crow, i > 0 && styles.browLine]}>
+                  <Icon
+                    name={up ? "up" : "down"}
+                    size={15}
+                    color={up ? colors.accent : colors.down}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cname} numberOfLines={1}>
+                      {mine ? "You" : (names.get(c.uid) ?? "…")}
+                    </Text>
+                    <Text style={styles.cmeta}>
+                      {c.symbol} {c.direction.toUpperCase()} · {c.window} · {c.stakeUsdso.toFixed(2)} tUSDC
+                    </Text>
+                  </View>
+                  <Chip
+                    label={c.status === "pending" ? "live" : c.status}
+                    tone={
+                      c.status === "won"
+                        ? "up"
+                        : c.status === "lost"
+                          ? "down"
+                          : c.status === "void"
+                            ? "neutral"
+                            : "gold"
+                    }
+                  />
+                </View>
+              );
+            })
+          )}
+        </Card>
 
         {/* Room board */}
         <View style={styles.boardHead}>
@@ -398,6 +485,9 @@ const styles = StyleSheet.create({
     overflow: "hidden", marginBottom: spacing(2.5),
   },
   boardEmpty: { ...font.bodySm, color: colors.textFaint, textAlign: "center", paddingVertical: spacing(7) },
+  crow: { flexDirection: "row", alignItems: "center", gap: spacing(3), paddingVertical: spacing(3), paddingHorizontal: spacing(4) },
+  cname: { color: colors.text, fontWeight: "800", fontSize: 14 },
+  cmeta: { ...font.bodySm, fontSize: 11.5, color: colors.textFaint, marginTop: 1 },
   brow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing(3), paddingHorizontal: spacing(4), gap: spacing(2.5) },
   browLine: { borderTopWidth: 1, borderTopColor: colors.border },
   rank: {

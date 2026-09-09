@@ -39,7 +39,8 @@ export type IconName =
   | "check"
   | "moon"
   | "live"
-  | "trash";
+  | "trash"
+  | "refresh";
 
 const GLYPHS: Record<IconName, React.ComponentProps<typeof Ionicons>["name"]> = {
   streak: "flame",
@@ -68,6 +69,7 @@ const GLYPHS: Record<IconName, React.ComponentProps<typeof Ionicons>["name"]> = 
   moon: "moon-outline",
   live: "radio-button-on",
   trash: "trash-outline",
+  refresh: "refresh",
 };
 
 interface Props {

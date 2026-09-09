@@ -201,8 +201,33 @@ export async function getUser(uid: string): Promise<UserDoc | null> {
   return snap.exists() ? (snap.data() as UserDoc) : null;
 }
 
+/**
+ * Display names for a set of uids, cached for the session.
+ *
+ * Calls carry only a uid, so a room's activity feed needs this to show who made
+ * each one. Cached because the same handful of members recur on every snapshot,
+ * and a live listener re-runs on each new call.
+ */
+const nameCache = new Map<string, string>();
+
+export async function fetchDisplayNames(uids: string[]): Promise<Map<string, string>> {
+  const missing = [...new Set(uids)].filter((u) => !nameCache.has(u));
+  if (missing.length > 0) {
+    const docs = await Promise.all(missing.map((u) => getDoc(doc(db(), "users", u)).catch(() => null)));
+    docs.forEach((snap, i) => {
+      const name = snap?.exists() ? (snap.data() as UserDoc).displayName : undefined;
+      // Fall back to a short uid so an unreadable profile still renders as
+      // something stable rather than blank.
+      nameCache.set(missing[i], name || `${missing[i].slice(0, 6)}…`);
+    });
+  }
+  return new Map(uids.map((u) => [u, nameCache.get(u) ?? `${u.slice(0, 6)}…`]));
+}
+
 export async function updateDisplayName(uid: string, displayName: string): Promise<void> {
   await setDoc(doc(db(), "users", uid), { displayName, updatedAt: Date.now() }, { merge: true });
+  // Keep the activity feed from showing the old name for the rest of the session.
+  nameCache.set(uid, displayName);
 }
 
 // ── Leaderboards ─────────────────────────────────────────────────────────

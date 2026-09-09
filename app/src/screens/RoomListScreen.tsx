@@ -24,6 +24,7 @@ import { IconTile } from "../components/ui/IconTile";
 import { Toggle } from "../components/ui/Toggle";
 import { Icon } from "../components/ui/Icon";
 import { useResponsive } from "../lib/useResponsive";
+import { useCollateralBalance } from "../lib/useCollateralBalance";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 
 type Props = NativeStackScreenProps<RootStackParamList, "RoomList">;
@@ -39,6 +40,7 @@ export default function RoomListScreen({ navigation }: Props) {
   const { profile, session } = useSession();
   const wallet = useWallet();
   const { isWide } = useResponsive();
+  const { balance, refresh: refreshBalance } = useCollateralBalance(wallet.address);
   const [rooms, setRooms] = useState<RoomDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -165,6 +167,20 @@ export default function RoomListScreen({ navigation }: Props) {
             {profile?.displayName ?? "…"}
           </Text>
         </View>
+        {/* Re-read rooms and balance without a page reload. */}
+        <Pressable
+          onPress={() => { Haptics.selectionAsync(); setRefreshing(true); load(); refreshBalance(); }}
+          disabled={refreshing}
+          accessibilityLabel="Refresh"
+          accessibilityRole="button"
+          style={styles.iconBtn}
+        >
+          {refreshing ? (
+            <ActivityIndicator color={colors.textMuted} size="small" />
+          ) : (
+            <Icon name="refresh" size={18} color={colors.textMuted} />
+          )}
+        </Pressable>
         <Pressable
           onPress={() => { Haptics.selectionAsync(); navigation.navigate("GlobalLeaderboard"); }}
           style={styles.iconBtn}
@@ -228,9 +244,17 @@ export default function RoomListScreen({ navigation }: Props) {
                       tone={wallet.kind === "embedded" ? "onPaper" : "coral"}
                       icon="wallet"
                     />
-                    <Text style={styles.walletAddr}>
-                      {wallet.address ? `${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}` : ""}
-                    </Text>
+                    <View style={styles.walletRight}>
+                      {/* Spendable collateral. Shown for both wallet kinds — a
+                          call escrows tUSDC, so this is the number that decides
+                          whether one can be placed at all. */}
+                      <Text style={styles.walletBal}>
+                        {balance === null ? "…" : `${balance.toFixed(2)} tUSDC`}
+                      </Text>
+                      <Text style={styles.walletAddr}>
+                        {wallet.address ? `${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}` : ""}
+                      </Text>
+                    </View>
                   </View>
                 ) : null}
               </Card>
@@ -400,7 +424,9 @@ const styles = StyleSheet.create({
     marginTop: spacing(3), paddingTop: spacing(3),
     borderTopWidth: 1, borderTopColor: "rgba(10,11,12,0.08)",
   },
-  walletAddr: { ...font.mono, fontSize: 12, color: colors.paperMuted },
+  walletRight: { alignItems: "flex-end" },
+  walletBal: { fontSize: 13, fontWeight: "900", color: colors.paperInk, fontVariant: ["tabular-nums"] },
+  walletAddr: { ...font.mono, fontSize: 11, color: colors.paperMuted, marginTop: 1 },
 
   sectionRow: { flexDirection: "row", alignItems: "center", gap: spacing(2), marginBottom: spacing(3) },
   sectionTitle: { ...font.h3, color: colors.text },
