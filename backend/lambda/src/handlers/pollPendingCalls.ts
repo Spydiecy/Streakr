@@ -18,6 +18,7 @@ import { getDb, admin } from "../firebaseAdmin";
 import { getNetwork, readSettlement, judgeCall, estimatePayoutRaw, readOutcomeBalance } from "../chain";
 import { applyStreakUpdate, shouldAwardRoomChampion } from "../gamification";
 import { notifySettlement, buildNotifyPayload } from "../n8n";
+import { postSettlementToTelegram } from "../telegram";
 import { buildResultCard } from "../resultCard";
 import type { CallDoc, UserDoc } from "../types";
 
@@ -131,7 +132,11 @@ async function settleOneCall(callSnap: admin.firestore.QueryDocumentSnapshot): P
   const cardDoc = buildResultCard(result.call, result.user);
   await db.collection("resultCards").doc(cardDoc.cardId).set(cardDoc, { merge: true });
 
-  await notifySettlement(buildNotifyPayload(result.call, result.user, result.xpAwarded, result.newBadges));
+  // Both notification paths are optional and independent — n8n for the workflow
+  // route, the Bot API directly for a route with no hosting dependency. Either,
+  // both, or neither; settlement never depends on them.
+  const notifyPayload = buildNotifyPayload(result.call, result.user, result.xpAwarded, result.newBadges);
+  await Promise.all([notifySettlement(notifyPayload), postSettlementToTelegram(notifyPayload)]);
 
   console.log(
     `settled call ${call.callId}: ${verdict} · streak=${result.user.currentStreak} · xp+${result.xpAwarded} · badges+${result.newBadges.join(",") || "none"}`,

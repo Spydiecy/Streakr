@@ -90,7 +90,7 @@ flowchart TB
 
     Mistral(("Mistral<br/>ministral-8b"))
 
-    subgraph N8N["🔔 n8n (designed, not deployed)"]
+    subgraph N8N["🔔 n8n (optional second path)"]
         Notify[Settlement Notify Workflow]
         NudgeFlow[Pre-Lock Nudge Workflow]
     end
@@ -112,11 +112,12 @@ flowchart TB
     Card --> FS
     Poll -- "read settlement status" --> SDK
     Poll -- "write streak/XP/badges/leaderboard" --> FS
-    Poll -. "POST outcome (unset)" .-> Notify
+    Poll -- "post outcome" --> Telegram
+    Poll -. "POST outcome (optional)" .-> Notify
     Notify -.-> Telegram
-    NudgeFlow -. "GET rooms closing soon" .-> Nudge
+    NudgeFlow -- "GET rooms closing soon" --> Nudge
     Nudge --> FS
-    NudgeFlow -.-> Telegram
+    NudgeFlow --> Telegram
 
     style Client fill:#171c26,stroke:#7c5cff,color:#f8fafc
     style Chain fill:#171c26,stroke:#22d3ee,color:#f8fafc
@@ -125,8 +126,10 @@ flowchart TB
     style N8N fill:#171c26,stroke:#ff5470,color:#f8fafc
 ```
 
-Solid edges are live. Dotted edges are the n8n/Telegram path — built and
-endpointed, but no n8n instance is running (see [step 5](#5--n8n-not-deployed)).
+Solid edges are live. The one dotted edge is the poller → n8n webhook, which needs
+n8n reachable at a public URL; the poller posts to Telegram directly regardless,
+so notifications don't depend on it. See
+[step 5](#5--telegram-notifications).
 
 **Why AWS Lambda instead of Firebase Cloud Functions:** Firestore and
 Firebase Auth stay on Firebase's free Spark plan. Cloud Functions requires
@@ -634,21 +637,59 @@ can't drift from the in-app mark:
 node scripts/generate-icons.mjs
 ```
 
-### 5 · n8n *(not deployed)*
+### 5 · Telegram notifications
 
-> The two workflows below are exported and wired to a live endpoint
-> (`streakr-pre-lock-nudge`), but **no n8n instance is currently running**, and
-> `N8N_SETTLEMENT_WEBHOOK_URL` is deliberately unset on the settlement poller.
-> Settlement, streaks, XP and leaderboards all work without it — the poller logs
-> a warning and continues. What's missing is only the Telegram ping. The
-> architecture diagram above shows this path; treat it as designed and endpointed
-> rather than live.
+There are **two independent paths**, and they compose — set either, or both.
+Neither is required: settlement, streaks, XP and leaderboards work regardless.
 
+**A · Direct from the Lambda** *(live)*
 
-Import both files in `n8n-workflows/` into an n8n instance — each has a
-`notes` field listing exactly which credentials/env vars it needs. Without
-this, calls still settle and streaks still update; you just don't get
-Telegram pings.
+The poller posts the outcome straight to the Bot API. No hosting, nothing to keep
+awake, so this is the one that survives a closed laptop:
+
+```bash
+aws lambda update-function-configuration --function-name streakr-poll-pending-calls \
+  --environment '{"Variables":{...,"TELEGRAM_BOT_TOKEN":"<token>","TELEGRAM_CHAT_ID":"<chat id>"}}'
+```
+
+Get a token from [@BotFather](https://t.me/BotFather), add the bot to a group,
+send one message there, then read the chat id from
+`https://api.telegram.org/bot<token>/getUpdates`. **A group chat id is negative**
+(e.g. `-5298062119`).
+
+Message text is built in `src/telegram.ts` and covered by 10 unit tests — mostly
+around MarkdownV2 escaping, since a single unescaped `.` or `_` makes Telegram
+reject the whole send, and display names and badge keys are full of them.
+
+**B · Via n8n** *(workflows importable; needs a reachable n8n)*
+
+Richer if you want to branch or add steps. Import without touching the UI:
+
+```bash
+npm install -g n8n
+n8n import:credentials --input=telegram-cred.json   # {"type":"telegramApi","data":{"accessToken":"..."}}
+n8n import:workflow --separate --input=n8n-workflows/
+n8n update:workflow --id=<id> --active=true         # both workflows
+
+N8N_BLOCK_ENV_ACCESS_IN_NODE=false \
+STREAKR_PRE_LOCK_NUDGE_URL="<nudge Function URL>" \
+STREAKR_N8N_SHARED_SECRET="<must equal N8N_SHARED_SECRET on that Lambda>" \
+STREAKR_DEFAULT_TELEGRAM_CHAT_ID="<chat id>" \
+n8n start
+```
+
+The two workflows have different reachability needs, which is worth knowing
+before choosing where to host:
+
+| Workflow | Direction | Needs a public URL? |
+|---|---|---|
+| Pre-Lock Nudge | schedule, calls **out** to the nudge Lambda | **no** — works from a local n8n |
+| Settlement Notify | **receives** a POST from the poller | **yes** — set `N8N_SETTLEMENT_WEBHOOK_URL` to its production webhook |
+
+`n8n start --tunnel` was removed in n8n 2.x, so exposing the webhook now means
+hosting n8n somewhere reachable (n8n Cloud, or Docker on a small box) rather than
+tunnelling from a laptop. Path A exists precisely so notifications don't depend
+on that.
 
 ## Testing a full call cycle
 
@@ -770,7 +811,8 @@ A few of the docs-level points, in brief:
 - [x] Full call cycle verified in-app: fund → call → on-chain → settle → streak
 - [x] Developer feedback — [`FEEDBACK.md`](FEEDBACK.md)
 - [x] Tests — 25 app unit tests, 10 backend unit tests, 7 browser checks
-- [ ] n8n / Telegram notifications — built and endpointed, no instance running
+- [x] Telegram notifications — live from the settlement poller; n8n workflows
+      importable as a second path (its webhook needs n8n hosted publicly)
 
 ---
 
