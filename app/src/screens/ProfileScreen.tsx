@@ -59,7 +59,12 @@ export default function ProfileScreen({ navigation }: Props) {
   return (
     <Screen edges={["top", "left", "right"]}>
       <View style={styles.head}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.back}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          accessibilityLabel="Go back"
+          accessibilityRole="button"
+          style={styles.back}
+        >
           <Icon name="back" size={20} color={colors.text} />
         </Pressable>
         <Text style={styles.headTitle}>Profile</Text>
@@ -86,17 +91,38 @@ export default function ProfileScreen({ navigation }: Props) {
                 <Text style={styles.avatarT}>{(profile?.displayName ?? "?").charAt(0).toUpperCase()}</Text>
               )}
             </LinearGradient>
-            <Text style={styles.name}>{profile?.displayName ?? "…"}</Text>
+            {/* Copy sits next to the name, because with no display name set the
+                name IS the shortened address — so the row below was repeating it
+                and only existed to host a "tap to copy" label. The icon carries
+                that affordance instead, and it copies the full address either
+                way. */}
+            <View style={styles.nameRow}>
+              <Text style={styles.name}>{profile?.displayName ?? "…"}</Text>
+              {wallet.address ? (
+                <Pressable
+                  onPress={copy}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={copied ? "Address copied" : "Copy wallet address"}
+                  style={styles.copyBtn}
+                >
+                  <Icon
+                    name={copied ? "check" : "copy"}
+                    size={15}
+                    color={copied ? colors.accentDeep : colors.paperMuted}
+                  />
+                </Pressable>
+              ) : null}
+            </View>
             {wallet.label ? <Chip label={wallet.label} tone="onPaper" icon="wallet" style={{ marginTop: spacing(2) }} /> : null}
-            <Pressable onPress={copy} style={styles.addrWrap}>
-              <Text style={styles.addr}>
-                {wallet.address ? `${wallet.address.slice(0, 10)}…${wallet.address.slice(-8)}` : "—"}
-              </Text>
-              <View style={styles.copyRow}>
-                {copied ? <Icon name="check" size={11} color={colors.accentDeep} /> : null}
-                <Text style={styles.copy}>{copied ? "copied" : "tap to copy"}</Text>
-              </View>
-            </Pressable>
+            {/* Only worth its own line when it isn't already the heading. */}
+            {wallet.address && !/^0x/.test(profile?.displayName ?? "") ? (
+              <Pressable onPress={copy} style={styles.addrWrap}>
+                <Text style={styles.addr}>
+                  {`${wallet.address.slice(0, 10)}…${wallet.address.slice(-8)}`}
+                </Text>
+              </Pressable>
+            ) : null}
 
             {/* Spendable collateral, same read for either wallet kind. */}
             <View style={styles.balRow}>
@@ -217,11 +243,15 @@ const styles = StyleSheet.create({
 
   avatar: { width: 76, height: 76, borderRadius: 38, alignItems: "center", justifyContent: "center" },
   avatarT: { fontSize: 32, fontWeight: "900", color: colors.onAccent },
-  name: { ...font.h2, color: colors.paperInk, marginTop: spacing(3) },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: spacing(2), marginTop: spacing(3) },
+  name: { ...font.h2, color: colors.paperInk },
+  copyBtn: {
+    width: 28, height: 28, borderRadius: radius.sm,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(10,11,12,0.06)",
+  },
   addrWrap: { alignItems: "center", marginTop: spacing(2) },
   addr: { ...font.mono, fontSize: 12, color: colors.paperMuted },
-  copyRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
-  copy: { fontSize: 10.5, fontWeight: "800", color: colors.accentDeep, textTransform: "uppercase" },
 
   balRow: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",

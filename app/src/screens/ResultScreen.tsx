@@ -141,9 +141,23 @@ export default function ResultScreen({ route, navigation }: Props) {
         )}
       </View>
 
+      {/* Reset rather than goBack, so the result screen can't be returned to by
+          swiping back — it's a terminal state for that call.
+          RoomList is kept UNDERNEATH Room: resetting to Room alone left it as the
+          only route in the stack, so the room's own back button had nowhere to go
+          and the user was stranded in the room after every call, unable to reach
+          the rooms list, their profile or the global leaderboard without reloading
+          the page. */}
       <Pressable
         style={styles.done}
-        onPress={() => navigation.reset({ index: 0, routes: [{ name: "Room", params: { roomId } }] })}
+        accessibilityLabel="Back to room"
+        accessibilityRole="button"
+        onPress={() =>
+          navigation.reset({
+            index: 1,
+            routes: [{ name: "RoomList" }, { name: "Room", params: { roomId } }],
+          })
+        }
       >
         <Text style={styles.doneT}>Back to room</Text>
       </Pressable>

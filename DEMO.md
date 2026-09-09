@@ -135,6 +135,23 @@ Read the message aloud:
 > "'Spy called BTC UP 15m and won. Returned 16.67 tUSDC. Streak: 1.' With a link
 > to the transaction — so the result is verifiable, not asserted."
 
+### 2:15 — Claim the winnings
+
+On the won row in **Call history**, tap **Claim**. The balance at the top of the
+profile goes up.
+
+> "One thing worth showing, because it surprised us. A resolved Event Contract
+> doesn't pay out on its own. You hold winning outcome tokens, and they're worth
+> the payout only once you burn them for the collateral behind them. So a user can
+> see 'you won 14.58' while their balance hasn't moved — which looks exactly like
+> the app losing their money. It isn't, but that distinction is invisible unless
+> you already know how these contracts settle. So we made redeeming a real button,
+> and this is it moving the tUSDC into the wallet."
+
+**Why show this:** it's a two-second interaction that demonstrates you understood
+the settlement model rather than assuming it worked like a centralised exchange.
+It's also the fix for the single most confusing thing a first-time user hits.
+
 ### 2:25 — Show a loss
 
 Either from history or by calling the unlikely side deliberately.
@@ -154,7 +171,7 @@ strongest risk argument.
 > and the error said 'missing or invalid parameters'. We measured it, fixed it,
 > and wrote it up."
 
-> "That's in FEEDBACK.md — fourteen findings, every number reproducible from a
+> "That's in FEEDBACK.md — eighteen findings, every number reproducible from a
 > script in the repo."
 
 **Why close here:** most submissions end on features. Ending on evidence that you

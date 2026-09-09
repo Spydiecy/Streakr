@@ -18,6 +18,7 @@
 import { open, wait, signIn, tap, tapBigButton, text, flat, reportProblems } from "./lib.mjs";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createPublicClient, http, formatUnits } from "viem";
+import { sendGas } from "./tools/gas.mjs";
 
 const url = process.argv[2] ?? "http://localhost:8899";
 const want = Number(process.argv[3] ?? 4);
@@ -60,6 +61,20 @@ console.log("   waiting for the faucet grant…");
 await wait(25_000);
 console.log("   collateral:", await collateral(), "tUSDC");
 
+// The product faucet grants enough gas for about three writes. This run needs
+// four (collateral approve, two orders, one redeem), so top up from the treasury.
+// Harness-only — it does not exercise or depend on any app code path.
+if (want > 0) {
+  // Non-fatal: a transient RPC/DNS blip here shouldn't abandon a run that the
+  // faucet grant alone may still be able to complete.
+  try {
+    const g = await sendGas(account.address, "0.4");
+    console.log(`   harness gas top-up: ${g.status}, now ${g.writes} writes affordable`);
+  } catch (e) {
+    console.log(`   harness gas top-up failed (continuing): ${String(e).split("\n")[0].slice(0, 120)}`);
+  }
+}
+
 // ------------------------------------------------------------- place the calls
 //
 // Both directions, deliberately. One of them has to win, so a claimable position
@@ -69,11 +84,24 @@ if (want > 0) {
   await tap(page, "test");
   await wait(9000);
 
+  // Switching windows refetches, and the buttons read "no liquidity" until that
+  // resolves — tapping during the gap silently does nothing. Wait for the card.
+  const waitForMarket = async (label = "") => {
+    for (let i = 0; i < 20; i++) {
+      const t = await text(page);
+      if (/LIVE/.test(t) && !/Reading live/.test(t)) return true;
+      if (/No live/.test(t)) return false;
+      await wait(2000);
+    }
+    console.log(`   market never finished loading ${label}`);
+    return false;
+  };
+
   // The room opens on whatever window it defaults to (1h), which would mean
   // waiting an hour for settlement. 15m is the shortest.
   console.log("\n2.0 selecting the 15m window");
   console.log("   selected:", await tap(page, "15m"));
-  await wait(7000);
+  await waitForMarket("after selecting 15m");
   const before = await text(page);
   const left = (before.match(/(?:^|\n)([0-9]+[hm]?[: ][0-9]+[hm]?)\nleft/) || [])[1] ?? "?";
   const label = (before.match(/(BTC|ETH) (15m|1h|4h|1d)/) || [])[0] ?? "?";
@@ -108,28 +136,43 @@ if (want > 0) {
     // to the room so the next call can be placed. The reset re-mounts the room
     // on its default window, so 15m has to be re-selected for the next call.
     await tap(page, "Back to room");
-    await wait(7000);
+    await wait(4000);
+    await waitForMarket("back in the room");
+    // The reset re-mounts the room on its default window, so 15m has to be
+    // re-selected — and waited for again.
     await tap(page, "15m");
-    await wait(6000);
+    await waitForMarket("after re-selecting 15m");
   }
 }
 
 // ------------------------------------------------- profile: cap + claim button
 console.log("\n3. opening profile");
 // The profile button lives on the ROOM LIST header, not the room's, so a run that
-// ends inside a room has to come back out first. Without this the 44x44 lookup
-// silently matches something on the room screen and the profile never opens.
+// ends inside a room has to leave it first — otherwise the 44x44 lookup matches
+// something on the room screen and the profile never opens.
+//
+// Reloading rather than hunting for the back control: the session is restored from
+// localStorage and the app lands on the room list, which is deterministic. Tapping
+// a header button identified only by its 40x40 box was not — it matched a
+// different element and the run sat on the room screen waiting for a Claim button
+// that is only ever rendered on the profile.
+// Navigate, don't reload. Calls are keyed by Firebase uid, not by wallet address,
+// and signing in again mints a NEW anonymous uid — so a reloaded run looks at an
+// empty history and can never find the win it just placed. The session has to be
+// kept alive for the whole run.
 const onRoomList = async () => /new room/i.test(await text(page));
+const tapLabel = (label) =>
+  page.evaluate((label) => {
+    const el = Array.from(document.querySelectorAll("[aria-label]")).find(
+      (e) => e.getAttribute("aria-label") === label && !e.closest('[aria-hidden="true"]'),
+    );
+    if (!el) return false;
+    el.click();
+    return true;
+  }, label);
+
 for (let i = 0; i < 4 && !(await onRoomList()); i++) {
-  await page.evaluate(() => {
-    // The room header's back control is 40x40.
-    const b = Array.from(document.querySelectorAll("*")).find((e) => {
-      if (e.closest('[aria-hidden="true"]')) return false;
-      const r = e.getBoundingClientRect();
-      return Math.round(r.width) === 40 && Math.round(r.height) === 40;
-    });
-    b?.click();
-  });
+  console.log("   tapping back:", await tapLabel("Back to rooms"));
   await wait(4000);
 }
 console.log("   on room list:", await onRoomList());

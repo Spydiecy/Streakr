@@ -294,7 +294,15 @@ export default function RoomScreen({ route, navigation }: Props) {
     <Screen edges={["top", "left", "right"]}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.head}>
-          <Pressable onPress={() => navigation.goBack()} style={styles.back}>
+          {/* Labelled because an icon-only control is unreadable to a screen
+              reader, and because "the 40x40 box in the header" is not a stable
+              way to identify it. */}
+          <Pressable
+            onPress={() => navigation.goBack()}
+            accessibilityLabel="Back to rooms"
+            accessibilityRole="button"
+            style={styles.back}
+          >
             <Icon name="back" size={20} color={colors.text} />
           </Pressable>
           <View style={{ flex: 1 }}>
