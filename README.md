@@ -61,6 +61,7 @@ Streakr wraps that primitive in a social layer:
 | 🔔 **Telegram** | Every settlement posts to the room's own group chat — linked with `/link CODE` — carrying the streak and a link to the transaction, so a result is verifiable rather than asserted |
 | 💰 **Claim winnings** | A resolved Event Contract doesn't pay out on its own — winning outcome tokens sit in the wallet until they're burned for the collateral behind them. Won calls carry a **Claim** action that redeems the position and moves the tUSDC into the wallet for real |
 | 🖼️ **Result Cards** | A shareable SVG generated the moment a call settles — the viral loop |
+| 📜 **Lists that stay put** | Room calls, room leaderboard and call history each stop growing and scroll inside themselves, so a busy room can't push the sections below it off the page. Capped by `maxHeight`, so a two-call room still renders two rows |
 | 🤖 **Momentum read** | One plain sentence phrased by Mistral `ministral-8b` from real recent window outcomes, labelled "AI take, not advice". The signal is the substance; the model only does wording, and falls back to a deterministic template on any failure so a third party can't break the room card |
 | 🚰 **Zero-setup onboarding** | A new wallet is granted testnet gas + collateral server-side, so a visitor can place a real call in under a minute |
 
@@ -107,6 +108,7 @@ flowchart TB
     Telegram(("Telegram"))
 
     Wallet -- "sign & submit call" --> SDK
+    Wallet -- "redeem a won position" --> SDK
     UI -- "read live markets/books" --> SDK
     UI -- "read price history (chart)" --> SDK
     UI -- "read tUSDC balance" --> SDK
@@ -190,12 +192,28 @@ sequenceDiagram
 
     FS-->>App: Live listener fires — Result screen updates instantly
     App->>U: 🎉 Streak +1, +20 XP, Share Result Card
+
+    Note over U,EC: The payout is RECORDED, not yet PAID
+
+    U->>App: Tap Claim on the won call (Profile)
+    App->>W: Request signature
+    W->>EC: redeem(winning leg balance)
+    EC-->>W: collateral transferred — balance finally moves
 ```
 
 The key property: **Streakr never decides who won.** `judgeCall()` only
 reads `onchain.winningOutcome` from the real settled market — the same
 authoritative status every other DreamDEX client reads, never the lagging
 indexer.
+
+The second property, and the one that surprised us: **settling and getting paid
+are different events.** A resolved Event Contract does not pay out on its own —
+the winning position doesn't decay into collateral, it sits in the wallet as
+outcome tokens until they're burned for the collateral behind them. So everything
+above can be correct, the feed can say "won 14.58 tUSDC", and the wallet balance
+still won't have moved. Redemption is the step that moves money, and it's the last
+four lines of the diagram rather than something the poller can do — see
+[the claim decision](#key-design-decisions).
 
 ## Data model
 
@@ -264,23 +282,43 @@ Streakr is that outcomes come from the chain, not from a client claiming a win.
 ```
 Streakr/
 ├── chain-integration/    DreamDEX Bot Kit (cloned + extended)
-│   └── scripts/
+│   └── scripts/          25 scripts; the ones referenced elsewhere in this README:
 │       ├── ec-doctor.ts                    preflight: venue + wallet check
 │       ├── place-event-contract-call.ts    real signed call submission
 │       ├── watch-settlement.ts             poll on-chain status → WIN/LOSS/VOID
-│       └── fund-collateral.ts              testnet tUSDC faucet helper
+│       ├── fund-collateral.ts              testnet tUSDC faucet helper
+│       ├── find-claimable.ts               unredeemed winning positions for a signer
+│       ├── redeem-position.ts              redeem with an arbitrary key, PK=0x…
+│       ├── measure-gas.ts / measure-fees.ts        the gas + fee measurements
+│       ├── repro-approve-revert.ts         minimal repro of the approve revert
+│       ├── profile-market-reads.ts         listBinaryMarkets vs loadMarkets timings
+│       ├── check-cadence-labels.ts         catches 899s-indexed 15m series
+│       ├── check-demo-wallet-funding.ts    proves a browser wallet can't bootstrap
+│       └── inspect-book.ts                 every resting level on both legs
 │
 ├── backend/
 │   ├── firestore.rules            security rules — client create-only
-│   ├── firestore.indexes.json     composite indexes for calls/rooms/leaderboard queries
+│   ├── firestore.indexes.json     8 composite indexes, one per real query shape
 │   └── lambda/                    AWS Lambda handlers (NOT Cloud Functions)
-│       ├── src/handlers/
-│       │   ├── pollPendingCalls.ts      settlement sweep, every 1 min (EventBridge)
-│       │   ├── faucet.ts                grants a new wallet gas + collateral
-│       │   ├── sentiment.ts             momentum one-liner
-│       │   ├── renderResultCard.ts      SVG share-card generator
-│       │   ├── preLockNudge.ts          "2 min to lock" data for n8n
-│       │   └── telegramWebhook.ts       /link CODE -> bind a group to a room
+│       ├── src/
+│       │   ├── handlers/
+│       │   │   ├── pollPendingCalls.ts   settlement sweep, every 1 min (EventBridge)
+│       │   │   ├── faucet.ts             grants a new wallet gas + collateral
+│       │   │   ├── sentiment.ts          momentum one-liner
+│       │   │   ├── renderResultCard.ts   SVG share-card generator
+│       │   │   ├── preLockNudge.ts       "2 min to lock" data for n8n
+│       │   │   └── telegramWebhook.ts    /link CODE -> bind a group to a room
+│       │   ├── gamification.ts      streak/XP/badge rules (10 unit tests)
+│       │   ├── telegram.ts          message building + MarkdownV2 escaping (10 tests)
+│       │   ├── resultCard.ts        hand-built SVG, no native deps
+│       │   ├── chain.ts             on-chain settlement reads
+│       │   ├── firebaseAdmin.ts     service-account Firestore client
+│       │   └── n8n.ts               optional settlement webhook post
+│       ├── scripts/
+│       │   ├── set-env.mjs          safe Lambda env merge — use this, not raw CLI
+│       │   ├── inspect-pending.mjs  why is a call still pending?
+│       │   ├── recent-calls.mjs     latest calls with status + payout
+│       │   └── purge-test-rooms.mjs delete rooms by name, plus their leaderboard
 │       └── DEPLOY.md              AWS CLI deploy walkthrough, per function
 │
 ├── app/                  Expo (React Native) — the actual product
@@ -289,14 +327,25 @@ Streakr/
 │   │   │   ├── chain.ts             SDK clients + the gas ceiling / fee override
 │   │   │   ├── eventContracts.ts    market discovery, books, placeCall, claim, faucet
 │   │   │   ├── errors.ts            chain/SDK/Firestore errors -> human sentences
+│   │   │   ├── quote.ts             leaf module: per-leg pricing + book quality
+│   │   │   ├── callOutcome.ts       leaf module: what a settled call actually did
+│   │   │   ├── priceFeed.ts         oracle candles for the sparkline
+│   │   │   ├── firestoreApi.ts      every Firestore read/write + live listeners
+│   │   │   ├── SessionContext.tsx   anonymous auth + the user profile
 │   │   │   ├── faucetApi.ts         client for the server-side funding grant
 │   │   │   ├── networkConfig.ts     leaf module: network + collateral decimals
+│   │   │   ├── firebase.ts / .web.ts    persistence differs per platform
+│   │   │   ├── keyStore.ts / .web.ts    SecureStore vs localStorage
 │   │   │   ├── WalletProvider.tsx   native: embedded wallet
 │   │   │   └── WalletProvider.web.tsx  web: RainbowKit + demo fallback
+│   │   ├── navigation/    RootNavigator + typed route params
 │   │   ├── screens/       Onboarding, RoomList, Room, Result, Profile, Leaderboard
 │   │   └── components/    CallSheet (confirm in place), ClaimRow (redeem a win),
-│   │                      ScrollBox (capped lists) + design-system primitives
+│   │                      Countdown, PriceChart, ui/ScrollBox (capped lists)
+│   │                      + design-system primitives
 │   ├── e2e/               headless-Chrome checks against the real build + chain
+│   │   └── tools/         bal.mjs (balances + affordable writes), gas.mjs
+│   │                      (treasury top-up), shot.mjs / shot-noname.mjs (screenshots)
 │   └── scripts/           icon generation, build gates (asset relocation, env verify)
 │
 └── n8n-workflows/        Telegram settlement notify + pre-lock nudge (JSON exports)
@@ -430,7 +479,7 @@ noted as future work.
 
 Firestore and Firebase Auth are both free on the Spark plan. Cloud Functions
 requires the paid Blaze plan even at free-tier usage volumes, so all backend
-logic was rebuilt as four plain Lambda handlers instead, talking to the same
+logic was rebuilt as six plain Lambda handlers instead, talking to the same
 Firestore via a service-account credential. The Result Card renderer uses
 hand-built SVG rather than `@napi-rs/canvas` for the same reason canvas
 libraries are a bad fit for a hand-uploaded Lambda zip: they ship
@@ -438,6 +487,81 @@ prebuilt native binaries keyed to a specific OS/architecture, which is
 exactly the kind of thing that silently breaks when built on a Mac and run
 on Amazon Linux. SVG has zero native dependencies and is still a real,
 shareable image.
+
+</details>
+
+<details>
+<summary><strong>Claiming has to happen client-side — the poller has no user key</strong></summary>
+
+<br>
+
+A resolved market doesn't pay out on its own, so something has to call `redeem`.
+That something cannot be the settlement poller: redeeming spends from the user's
+wallet, and the poller holds only a Firestore service-account credential. It has
+no user private key and shouldn't ever have one. So the one action that actually
+moves money is the one piece of the settlement path that can't be done on the
+server.
+
+That's why `claimCall()` lives in `app/src/lib/eventContracts.ts` alongside
+`placeCall`, and why the claim surface is a per-row button in the profile's call
+history (`app/src/components/ClaimRow.tsx`) rather than something automatic.
+
+Three details worth stating, because each was a bug first:
+
+- **`redeem`'s `amount` is in outcome tokens.** Not collateral, and not the payout
+  figure already on screen. Passing either under-redeems and silently strands the
+  remainder — the same units confusion as `estPayoutFor`, in a second place.
+- **The held balance is the authority, not the recorded payout.** `claimCall`
+  reads the winning leg's on-chain balance and redeems that, so a mis-recorded
+  payout can't cause an over- or under-claim.
+- **The row reads the chain before rendering.** `getClaimableShares` returns 0
+  once redeemed, so a claimed history goes quiet instead of showing buttons that
+  would fail. That's also what makes tapping Claim twice harmless.
+
+</details>
+
+<details>
+<summary><strong>Long lists are capped with <code>maxHeight</code>, never a fixed <code>height</code></strong></summary>
+
+<br>
+
+Room calls, the room leaderboard and call history all grow without limit. A room
+with a dozen calls pushed the leaderboard and everything under it off the bottom
+of the page, so reaching the next section meant scrolling past every row.
+`app/src/components/ui/ScrollBox.tsx` caps each one and scrolls it in place.
+
+`maxHeight` rather than `height` because a fixed height is wrong in the common
+case: a room with two calls should render a two-row card, not a mostly-empty box
+padded out to 320px. The cap only engages once there's more content than fits.
+
+The fade at the bottom isn't decoration. A nested scroller shows no scrollbar on
+a touch device, so without it a capped list is indistinguishable from a complete
+one — the user has no way to know rows continue. It renders only while there's
+content still below, and sits in a `pointerEvents="none"` overlay so it can't
+swallow a tap meant for the last row.
+
+Verified against real data by `e2e/scrollbox.mjs`, which asserts the box overflows
+before claiming the cap works — otherwise a short list would pass trivially.
+
+</details>
+
+<details>
+<summary><strong><code>RoomList</code> stays beneath <code>Room</code> when the result screen resets</strong></summary>
+
+<br>
+
+The result screen is a terminal state for a call, so "Back to room" resets the
+navigation stack rather than calling `goBack()` — otherwise a back-swipe returns
+to a result the user already dismissed.
+
+Resetting to `[Room]` alone, though, left Room as the *only* route in the stack.
+Its own back button then had nowhere to go, so after placing any call the user was
+stranded in the room with no route to the rooms list, their profile or the global
+leaderboard short of reloading the page. Since claiming a win lives on the
+profile, the feature was unreachable by the path a user actually takes to it.
+
+The reset is now `[RoomList, Room]` with `index: 1`: same screen in front, back
+still works behind it.
 
 </details>
 
@@ -706,9 +830,19 @@ The poller posts the outcome straight to the Bot API. No hosting, nothing to kee
 awake, so this is the one that survives a closed laptop:
 
 ```bash
-aws lambda update-function-configuration --function-name streakr-poll-pending-calls \
-  --environment '{"Variables":{...,"TELEGRAM_BOT_TOKEN":"<token>","TELEGRAM_CHAT_ID":"<chat id>"}}'
+cd backend/lambda
+node scripts/set-env.mjs streakr-poll-pending-calls \
+  TELEGRAM_BOT_TOKEN=<token> TELEGRAM_CHAT_ID=<chat id>
 ```
+
+**Use that script rather than `aws lambda update-function-configuration` directly.**
+The raw command replaces the whole environment, so every existing variable has to
+be passed back in — and round-tripping `FIREBASE_SERVICE_ACCOUNT_JSON` through the
+API turns its `\n` escapes into real newlines. That kills the function at startup
+with `Bad control character in string literal in JSON`, pointing at `getDb` rather
+than at the deploy that broke it. It cost us two debugging sessions before the
+script existed. `set-env.mjs` merges into the current environment, re-reads the
+credential from disk, and asserts the escaping before and after writing.
 
 Get a token from [@BotFather](https://t.me/BotFather), add the bot to a group,
 send one message there, then read the chat id from
@@ -769,6 +903,7 @@ flowchart LR
     G --> H["Result updates live<br/>(Firestore listener)"]
     H --> I[Streak / XP / Badges update]
     I --> J[Share Result Card]
+    I --> K["Claim the win<br/>(redeem → balance moves)"]
 ```
 
 **Two things to know before demoing**, both venue behaviour rather than app bugs:
@@ -805,6 +940,47 @@ node e2e/claim.mjs    http://localhost:8899 4      # redeeming a win raises the 
 
 Each exits non-zero on failure. Point any of them at the deployed URL to check
 production instead.
+
+`e2e/tools/` holds helpers rather than checks:
+
+```bash
+node e2e/tools/bal.mjs <address>…             # STT, affordable writes, tUSDC
+node e2e/tools/gas.mjs <address> [amount]     # treasury top-up (harness only)
+node e2e/tools/shot.mjs <url> <out.png> [profile|room] [pk]
+node e2e/tools/shot-noname.mjs <url> <out.png>
+```
+
+`bal.mjs` reports **affordable writes** alongside the balance, because that's the
+number that predicts whether a call can be placed — at a 2,000,000 gas ceiling and
+12 gwei, each write needs 0.024 STT held. `gas.mjs` exists because the product
+faucet correctly refuses a wallet already above its gas floor, which is right for
+users but leaves a test wallet short when one run needs four writes.
+
+### Diagnostics
+
+For when something is wrong in live data rather than in the UI:
+
+```bash
+cd backend/lambda
+node scripts/inspect-pending.mjs [limit]   # why is a call still pending?
+node scripts/recent-calls.mjs [limit]      # latest calls, status + payout
+node scripts/purge-test-rooms.mjs "Name"   # delete rooms created by test runs
+
+cd chain-integration
+npx tsx scripts/find-claimable.ts                      # unredeemed wins for the signer
+PK=0x… npx tsx scripts/redeem-position.ts [marketId]   # redeem with a specific key
+```
+
+`inspect-pending.mjs` separates the two failures that look identical from the UI:
+a poller not picking a call up, versus a market that simply hasn't resolved yet. It
+prints `closesAtSec` against now, so "overdue" is visible rather than inferred.
+
+`redeem-position.ts` mirrors what the app's Claim button does, against the same SDK
+surface, reporting collateral either side. Note it goes through the bot kit's
+**default** trader with no fee override, so it needs ~1.2 STT on hand — running it
+reproduces the 60 gwei problem from the other direction, reverting with
+`setOperator reverted: Missing or invalid parameters` on a wallet that holds plenty
+for the app's own path.
 
 ## Verified on-chain
 
@@ -852,7 +1028,7 @@ read fails.
 
 ## DreamDEX SDK & docs feedback
 
-> **The full write-up is in [`FEEDBACK.md`](FEEDBACK.md)** — 20+ findings with
+> **The full write-up is in [`FEEDBACK.md`](FEEDBACK.md)** — 17 findings with
 > measurements, reproduction scripts, and suggested fixes ranked by impact.
 > Highlights: a fixed 60 gwei `maxFeePerGas` that makes any ordinary end-user
 > wallet unable to place a call; `approve` costing 1,389,617 gas on Somnia;

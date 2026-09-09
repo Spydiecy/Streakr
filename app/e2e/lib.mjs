@@ -7,6 +7,33 @@ export const CHROME =
 
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Is a failed request just a long-lived stream being cut, rather than a fault?
+ *
+ * Firestore listeners and the chain websocket hold open streaming connections for
+ * as long as the page lives. Navigating or closing the browser aborts them
+ * mid-flight, and Chrome reports that as a failed request — so every check that
+ * used a live listener reported `ERR_ABORTED` on a Firestore channel and exited
+ * non-zero at random, depending on where teardown landed. A suite that fails
+ * intermittently on healthy runs gets ignored, which is worse than not having one.
+ *
+ * Deliberately narrow: only these hosts, only these abort/timeout codes. A real
+ * Firestore failure (permission denied, DNS, 5xx) has a different errorText and
+ * still fails the check.
+ */
+function isBenignStreamTeardown(url, err) {
+  const streaming =
+    /firestore\.googleapis\.com\/.*\/(Listen|Write)\/channel/.test(url) ||
+    /\/ws$/.test(url);
+  if (!streaming) return false;
+  return (
+    err === "net::ERR_ABORTED" ||
+    err === "net::ERR_CONNECTION_ABORTED" ||
+    err.startsWith("net::ERR_QUIC_PROTOCOL_ERROR") ||
+    err === "net::ERR_TIMED_OUT"
+  );
+}
+
 export async function open({ url, width = 430, height = 950 }) {
   const browser = await puppeteer.launch({
     executablePath: CHROME,
@@ -21,9 +48,12 @@ export async function open({ url, width = 430, height = 950 }) {
   page.on("console", (m) => {
     if (m.type() === "error") problems.push(`console ${m.text().slice(0, 240)}`);
   });
-  page.on("requestfailed", (r) =>
-    problems.push(`REQFAIL ${r.url().slice(0, 120)} :: ${r.failure()?.errorText}`),
-  );
+  page.on("requestfailed", (r) => {
+    const url = r.url();
+    const err = r.failure()?.errorText ?? "";
+    if (isBenignStreamTeardown(url, err)) return;
+    problems.push(`REQFAIL ${url.slice(0, 120)} :: ${err}`);
+  });
 
   await page.goto(url, { waitUntil: "networkidle2", timeout: 60_000 });
   await wait(3500);

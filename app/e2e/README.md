@@ -36,6 +36,12 @@ Chrome is expected at the macOS default path; override with `CHROME=`.
 | `align.mjs` | Measures rendered box centres to find off-centre children and horizontal overflow |
 | `errpath.mjs` | The funding gate on an unfunded wallet, and that no raw SDK jargon reaches the screen |
 | `history.mjs` | Settled call rows explain the outcome, not just a WON/LOST badge |
+| `scrollbox.mjs` | Room calls / leaderboard / history cap out and scroll in place, and the section below stays reachable |
+| `claim.mjs` | Places both legs of one 15m market so a win is guaranteed, then redeems it and checks the collateral balance rose |
+
+`tools/` holds helpers rather than checks: `bal.mjs` (balances plus affordable
+writes), `gas.mjs` (treasury top-up for a probe wallet), `shot.mjs` /
+`shot-noname.mjs` (screenshots for eyeballing layout).
 
 ```bash
 node e2e/flow.mjs    http://localhost:8899 430 900
@@ -43,7 +49,16 @@ node e2e/switch.mjs  http://localhost:8899
 node e2e/align.mjs   http://localhost:8899 430
 node e2e/align.mjs   http://localhost:8899 1512   # desktop
 node e2e/errpath.mjs http://localhost:8899
+node e2e/scrollbox.mjs http://localhost:8899
+node e2e/claim.mjs   http://localhost:8899 2      # 0 to skip placing and just claim
 ```
+
+`claim.mjs` prints the key it generates, so a run can be resumed against the same
+wallet with `CLAIM_PK=0x… node e2e/claim.mjs <url> 0`. Two things it has to work
+around: calls are keyed by Firebase **uid**, not wallet address, so reloading and
+signing in again mints a new uid and an empty history — the session must survive
+the whole run. And switching windows refetches, during which the call buttons read
+"no liquidity", so it waits for the market card rather than sleeping a fixed time.
 
 Point any of them at `https://streakr-opal.vercel.app` to check production
 instead of a local build.
