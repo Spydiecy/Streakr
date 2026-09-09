@@ -59,6 +59,7 @@ Streakr wraps that primitive in a social layer:
 | 🧾 **Explained results** | Each settled call says what actually happened — "Closed Up — won 16.67 tUSDC (+11.67 profit)" — with the resolved leg derived from the verdict and the amount valued from the on-chain share count |
 | 📈 **Price chart** | A sparkline of recent closes for the asset being called, sized to the window (minute candles for 15m, hourly for 1d), from the same oracle feed the momentum line reads — so the chart and the AI take can't contradict each other |
 | 🔔 **Telegram** | Every settlement posts to the room's own group chat — linked with `/link CODE` — carrying the streak and a link to the transaction, so a result is verifiable rather than asserted |
+| 💰 **Claim winnings** | A resolved Event Contract doesn't pay out on its own — winning outcome tokens sit in the wallet until they're burned for the collateral behind them. Won calls carry a **Claim** action that redeems the position and moves the tUSDC into the wallet for real |
 | 🖼️ **Result Cards** | A shareable SVG generated the moment a call settles — the viral loop |
 | 🤖 **Momentum read** | One plain sentence phrased by Mistral `ministral-8b` from real recent window outcomes, labelled "AI take, not advice". The signal is the substance; the model only does wording, and falls back to a deterministic template on any failure so a third party can't break the room card |
 | 🚰 **Zero-setup onboarding** | A new wallet is granted testnet gas + collateral server-side, so a visitor can place a real call in under a minute |
@@ -286,14 +287,15 @@ Streakr/
 │   ├── src/
 │   │   ├── lib/           wallet, chain client, Firestore API, session, error mapping
 │   │   │   ├── chain.ts             SDK clients + the gas ceiling / fee override
-│   │   │   ├── eventContracts.ts    market discovery, books, placeCall, faucet
+│   │   │   ├── eventContracts.ts    market discovery, books, placeCall, claim, faucet
 │   │   │   ├── errors.ts            chain/SDK/Firestore errors -> human sentences
 │   │   │   ├── faucetApi.ts         client for the server-side funding grant
 │   │   │   ├── networkConfig.ts     leaf module: network + collateral decimals
 │   │   │   ├── WalletProvider.tsx   native: embedded wallet
 │   │   │   └── WalletProvider.web.tsx  web: RainbowKit + demo fallback
 │   │   ├── screens/       Onboarding, RoomList, Room, Result, Profile, Leaderboard
-│   │   └── components/    CallSheet (confirm in place) + design-system primitives
+│   │   └── components/    CallSheet (confirm in place), ClaimRow (redeem a win),
+│   │                      ScrollBox (capped lists) + design-system primitives
 │   ├── e2e/               headless-Chrome checks against the real build + chain
 │   └── scripts/           icon generation, build gates (asset relocation, env verify)
 │
@@ -797,6 +799,8 @@ node e2e/fullcall.mjs http://localhost:8899        # the whole loop, real signed
 node e2e/errpath.mjs  http://localhost:8899        # funding gate, no raw SDK jargon on screen
 node e2e/history.mjs  http://localhost:8899        # settled rows explain themselves
 node e2e/align.mjs    http://localhost:8899 1512   # measures rendered layout geometry
+node e2e/scrollbox.mjs http://localhost:8899       # long lists cap and scroll in place
+node e2e/claim.mjs    http://localhost:8899 4      # redeeming a win raises the balance
 ```
 
 Each exits non-zero on failure. Point any of them at the deployed URL to check
@@ -888,7 +892,7 @@ A few of the docs-level points, in brief:
 - [x] Real DreamDEX Event Contracts integration, social/gamified UX, AI feature
 - [x] Full call cycle verified in-app: fund → call → on-chain → settle → streak
 - [x] Developer feedback — [`FEEDBACK.md`](FEEDBACK.md)
-- [x] Tests — 51 app unit tests, 20 backend unit tests, 7 browser checks
+- [x] Tests — 51 app unit tests, 20 backend unit tests, 9 browser checks
 - [x] Telegram settlement notifications — live from the poller
 - [x] Demo walkthrough — [`DEMO.md`](DEMO.md)
 - [ ] Pre-lock nudge — workflow built and verified, but needs n8n hosted to run

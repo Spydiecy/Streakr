@@ -20,6 +20,8 @@ import { BADGE_ICONS } from "../lib/badgeIcons";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useCollateralBalance } from "../lib/useCollateralBalance";
 import { callOutcomeLine } from "../lib/callOutcome";
+import { ClaimRow } from "../components/ClaimRow";
+import { ScrollBox } from "../components/ui/ScrollBox";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Profile">;
 
@@ -145,7 +147,8 @@ export default function ProfileScreen({ navigation }: Props) {
           {calls.length === 0 ? (
             <Text style={styles.empty}>No calls yet.</Text>
           ) : (
-            calls.map((c, i) => (
+            <ScrollBox maxHeight={340}>
+            {calls.map((c, i) => (
               <View key={c.callId} style={[styles.hrow, i > 0 && styles.hline, { alignItems: "flex-start" }]}>
                 <Icon
                   name={c.direction === "up" ? "up" : "down"}
@@ -163,13 +166,17 @@ export default function ProfileScreen({ navigation }: Props) {
                       turns a bare WON/LOST badge into something the user can
                       actually check against the market. */}
                   <Text style={styles.houtcome}>{callOutcomeLine(c)}</Text>
+                  {/* Winnings don't arrive on their own — the position has to be
+                      redeemed. This is that step. */}
+                  <ClaimRow call={c} onClaimed={refreshBalance} />
                 </View>
                 <Chip
                   label={c.status}
                   tone={c.status === "won" ? "up" : c.status === "lost" ? "down" : c.status === "void" ? "neutral" : "gold"}
                 />
               </View>
-            ))
+            ))}
+            </ScrollBox>
           )}
         </Card>
 

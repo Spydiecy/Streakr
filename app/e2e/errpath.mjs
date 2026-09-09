@@ -49,7 +49,10 @@ console.log(leaks.length ? leaks.map((l) => `  *** LEAKED: ${l}`).join("\n") : "
 console.log("\n=== funding gate ===");
 const shortfall = /Not enough tUSDC/.test(body);
 const fundBtn = /Fund this wallet/.test(body);
-const funded = /Stake[\s\S]*Sign & Submit Call/.test(body) && !shortfall;
+// Matches CallSheet's confirm button. Previously "Sign & Submit Call" — a label
+// that stopped existing when CallSheet replaced CallConfirmScreen, so this read
+// as "not funded" no matter what the wallet held.
+const funded = /Stake[\s\S]*Sign & place call/i.test(body) && !shortfall;
 console.log(`  shortfall stated: ${shortfall}`);
 console.log(`  fund button:      ${fundBtn}`);
 console.log(`  wallet is funded: ${funded}`);

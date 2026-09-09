@@ -53,7 +53,9 @@ if (!ask || ask === "—") {
 
 await tapBigButton(page, side);
 await wait(14_000);
-await tapBigButton(page, "Sign & Submit Call", 30, 120);
+// CallSheet's confirm label. Was "Sign & Submit Call" (the old CallConfirmScreen),
+// which silently matched nothing after that screen was replaced.
+console.log("  confirm tapped:", await tapBigButton(page, "Sign & place call", 30, 120));
 
 let placed = false;
 for (let i = 0; i < 25; i++) {

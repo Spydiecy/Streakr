@@ -290,6 +290,99 @@ export interface PlaceCallResult {
   stakeSpent: number;
 }
 
+/**
+ * Winning outcome tokens still sitting in the wallet for a settled call.
+ *
+ * A resolved market does NOT pay out on its own. The winning position doesn't
+ * decay into collateral — it just sits there until someone burns it for the
+ * collateral behind it. So a won call shows a payout while the wallet balance is
+ * unchanged, which reads as the money having gone missing.
+ *
+ * Returns 0 once redeemed, which is what makes a claim idempotent from the UI's
+ * point of view.
+ */
+export async function getClaimableShares(
+  address: `0x${string}`,
+  positionId: string,
+  direction: Direction,
+): Promise<{ shares: number; resolved: boolean; voided: boolean }> {
+  const exchange = createReadOnlyExchange();
+  const onchain = await exchange.client.getMarketOnchain(positionId as `0x${string}`);
+  const leg = direction === "up" ? onchain.yesId : onchain.noId;
+  const raw = await exchange.client.getOutcomeBalance({
+    outcomeToken: onchain.outcomeToken,
+    account: address,
+    id: leg,
+  });
+  return {
+    shares: Number(raw) / 10 ** onchain.decimals,
+    resolved: onchain.isResolved,
+    voided: onchain.isVoided,
+  };
+}
+
+/**
+ * Burn a settled call's winning tokens for the collateral behind them.
+ *
+ * This is the step that actually moves money into the wallet. Redemption is
+ * module-routed: the module pulls the winning tokens, finalizes the market if it
+ * hasn't been finalized yet, and redeems through the settlement singleton — so a
+ * caller doesn't need to finalize separately.
+ *
+ * Uses the whole held balance rather than the recorded payout, because the chain
+ * is the authority on what's actually claimable.
+ */
+export async function claimCall(
+  signer: CallSigner,
+  positionId: string,
+  direction: Direction,
+): Promise<{ txHash: string; claimed: number }> {
+  const exchange: SomniaMarkets =
+    signer.kind === "embedded"
+      ? createSignerExchange(signer.privateKey)
+      : createWalletClientExchange(signer.walletClient);
+
+  const onchain = await exchange.client.getMarketOnchain(positionId as `0x${string}`);
+  if (!onchain.isResolved && !onchain.isVoided) {
+    throw new Error("This market hasn't settled yet, so there's nothing to claim.");
+  }
+
+  const me = (signer.kind === "embedded"
+    ? privateKeyToAccount(signer.privateKey).address
+    : signer.walletClient.account?.address) as `0x${string}` | undefined;
+  if (!me) throw new Error("No wallet address available to claim with.");
+
+  const leg = direction === "up" ? 0 : 1;
+  const amount = await exchange.client.getOutcomeBalance({
+    outcomeToken: onchain.outcomeToken,
+    account: me,
+    id: leg === 0 ? onchain.yesId : onchain.noId,
+  });
+  if (amount <= 0n) throw new Error("Nothing left to claim — this one has already been redeemed.");
+
+  // Same gas ceiling and fee override as placing a call; see TX_GAS_CEILING.
+  const trader = createTrader(
+    exchange,
+    signer.kind === "embedded" ? { privateKey: signer.privateKey } : { walletClient: signer.walletClient },
+  );
+
+  const res = await trader.redeem({
+    marketId: positionId as `0x${string}`,
+    market: onchain.marketAddress,
+    outcomeToken: onchain.outcomeToken,
+    outcomeIdx: leg as 0 | 1,
+    amount,
+  } as never);
+
+  // The SDK resolves even on a reverted receipt, so this must be explicit or a
+  // failed claim looks successful.
+  if (res.receipt?.status === "reverted") {
+    throw new Error(`claim reverted on-chain (tx ${res.hash ?? "?"})`);
+  }
+
+  return { txHash: res.hash ?? "", claimed: Number(amount) / 10 ** onchain.decimals };
+}
+
 export interface CollateralBalance {
   raw: bigint;
   human: number;

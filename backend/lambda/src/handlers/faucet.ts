@@ -61,6 +61,16 @@ const USDC_GRANT = BigInt(Math.round(Number(process.env.FAUCET_USDC ?? "150") * 
 const TREASURY_MIN_STT = parseEther("0.03");
 /** Max grants in any rolling 24h window. */
 const DAILY_GRANT_CAP = Number(process.env.FAUCET_DAILY_CAP ?? "60");
+/**
+ * Lifetime grants per address. More than one so a wallet that spends its gas can
+ * recover, bounded so it can't be looped.
+ */
+const MAX_GRANTS_PER_ADDRESS = Number(process.env.FAUCET_MAX_GRANTS ?? "5");
+/**
+ * Only top up below this. A wallet with gas doesn't need more, and refusing above
+ * the floor is what stops repeat calls draining the treasury.
+ */
+const GAS_FLOOR = parseEther(process.env.FAUCET_GAS_FLOOR ?? "0.05");
 
 const erc20Abi = [
   {
@@ -124,13 +134,25 @@ export const handler = async (event: LambdaHttpEvent): Promise<LambdaHttpRespons
   const db = getDb();
   const grantRef = db.collection("faucetGrants").doc(address);
 
-  // One grant per address, ever. Checked before any spend.
+  // Grants are capped per address, not limited to one.
+  //
+  // A single grant turned out to be a dead end: each call needs
+  // `gasLimit x maxFeePerGas` present, so 0.08 STT covers roughly three writes.
+  // A wallet that placed a few calls then ran dry could not transact again and
+  // had no way to recover — the app simply stopped working for that user, and the
+  // node's -32000 gave no hint why.
+  //
+  // Top-ups are allowed while the address is BELOW the gas floor and under a
+  // lifetime cap, so a stuck wallet can recover but a script can't drain the
+  // treasury by looping.
   const existing = await grantRef.get();
-  if (existing.exists) {
+  const priorGrants: number = existing.exists ? (existing.data()?.grants ?? 1) : 0;
+
+  if (priorGrants >= MAX_GRANTS_PER_ADDRESS) {
     return jsonResponse(200, {
       alreadyFunded: true,
-      grantedAt: existing.data()?.grantedAt ?? null,
-      message: "This address has already been funded.",
+      grants: priorGrants,
+      message: `This address has reached its limit of ${MAX_GRANTS_PER_ADDRESS} funding grants.`,
     });
   }
 
@@ -163,7 +185,23 @@ export const handler = async (event: LambdaHttpEvent): Promise<LambdaHttpRespons
       treasuryStt: formatEther(treasuryStt),
     });
   }
-  if (treasuryUsdc < USDC_GRANT) {
+
+  // A repeat request only tops up gas, and only when the wallet is actually low.
+  // Collateral is handed out on the first grant only: it's the scarcer treasury
+  // resource, the app can mint more via the public tUSDC faucet once it has gas,
+  // and a wallet that lost its collateral lost it by trading.
+  const isTopUp = priorGrants > 0;
+  if (isTopUp && recipientStt >= GAS_FLOOR) {
+    return jsonResponse(200, {
+      alreadyFunded: true,
+      grants: priorGrants,
+      sttBalance: formatEther(recipientStt),
+      message: "This wallet still has gas — nothing to top up.",
+    });
+  }
+  const grantUsdc = isTopUp ? 0n : USDC_GRANT;
+
+  if (treasuryUsdc < grantUsdc) {
     console.error(`faucet: treasury collateral too low (${formatUnits(treasuryUsdc, DECIMALS)} tUSDC)`);
     return jsonResponse(503, {
       error: "faucet is out of collateral — the treasury needs topping up",
@@ -171,46 +209,81 @@ export const handler = async (event: LambdaHttpEvent): Promise<LambdaHttpRespons
     });
   }
 
-  // Record the grant BEFORE spending. A duplicate request that races this one
-  // then loses on the create and cannot double-spend; the cost of failing after
-  // this point is one address that has to be topped up by hand, which is much
-  // cheaper than an unbounded drain.
+  // Record BEFORE spending. A duplicate request that races this one loses on the
+  // transaction and cannot double-spend; the cost of failing after this point is
+  // one address needing a manual top-up, far cheaper than an unbounded drain.
   try {
-    await grantRef.create({
-      address,
-      grantedAt: Date.now(),
-      sttWei: STT_GRANT.toString(),
-      usdcRaw: USDC_GRANT.toString(),
-      status: "sending",
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(grantRef);
+      const grants: number = snap.exists ? (snap.data()?.grants ?? 1) : 0;
+      if (grants >= MAX_GRANTS_PER_ADDRESS) throw new Error("cap reached");
+      tx.set(
+        grantRef,
+        {
+          address,
+          grants: grants + 1,
+          grantedAt: Date.now(),
+          sttWei: STT_GRANT.toString(),
+          usdcRaw: grantUsdc.toString(),
+          status: "sending",
+        },
+        { merge: true },
+      );
     });
   } catch {
-    return jsonResponse(200, { alreadyFunded: true, message: "This address has already been funded." });
+    return jsonResponse(200, {
+      alreadyFunded: true,
+      grants: priorGrants,
+      message: "This address has reached its funding limit.",
+    });
   }
 
   try {
-    // Skip the gas grant if the address somehow already has enough — an external
-    // wallet that's been fauceted elsewhere only needs collateral.
+    // Send gas whenever the wallet is below the floor.
+    //
+    // This used to compare against STT_GRANT/2, a second threshold that disagreed
+    // with GAS_FLOOR: a wallet on 0.0478 STT passed the top-up gate (below the
+    // 0.05 floor) and was then skipped here (above 0.04), so the request consumed
+    // a grant, sent nothing, and still reported success. One threshold only.
     let sttHash: string | null = null;
-    if (recipientStt < STT_GRANT / 2n) {
+    if (recipientStt < GAS_FLOOR) {
       sttHash = await walletClient.sendTransaction({ to: address, value: STT_GRANT });
       await publicClient.waitForTransactionReceipt({ hash: sttHash as `0x${string}`, timeout: 60_000 });
     }
 
-    const usdcHash = await walletClient.writeContract({
-      address: COLLATERAL,
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [address, USDC_GRANT],
-    });
-    await publicClient.waitForTransactionReceipt({ hash: usdcHash, timeout: 60_000 });
+    let usdcHash: string | null = null;
+    if (grantUsdc > 0n) {
+      usdcHash = await walletClient.writeContract({
+        address: COLLATERAL,
+        abi: erc20Abi,
+        functionName: "transfer",
+        args: [address, grantUsdc],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: usdcHash as `0x${string}`, timeout: 60_000 });
+    }
+
+    // Nothing actually sent means nothing was needed — hand the grant back rather
+    // than charging the address for a no-op, and don't claim it was funded.
+    if (!sttHash && !usdcHash) {
+      await grantRef.set({ grants: priorGrants, status: "noop" }, { merge: true });
+      return jsonResponse(200, {
+        funded: false,
+        alreadyFunded: true,
+        grants: priorGrants,
+        sttBalance: formatEther(recipientStt),
+        message: "This wallet already has gas and collateral — nothing to send.",
+      });
+    }
 
     await grantRef.update({ status: "sent", sttHash, usdcHash });
 
     return jsonResponse(200, {
       funded: true,
       address,
+      topUp: isTopUp,
+      grants: priorGrants + 1,
       stt: sttHash ? formatEther(STT_GRANT) : "0 (already had gas)",
-      usdc: formatUnits(USDC_GRANT, DECIMALS),
+      usdc: usdcHash ? formatUnits(grantUsdc, DECIMALS) : "0 (gas top-up only)",
       sttHash,
       usdcHash,
     });

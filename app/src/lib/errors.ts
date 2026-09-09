@@ -90,15 +90,19 @@ export function friendlyError(e: unknown): FriendlyError {
   // when the sender can't cover `gasLimit x gasPrice`. It reads like a client
   // bug and sent us looking at ABI encoding; it is really an underfunded wallet.
   // Matched on the SDK's wrapper text for the two writes that hit it first.
+  // "Missing or invalid parameters" is the node's -32000 for any write whose
+  // `gasLimit x maxFeePerGas` the sender can't cover, so it shows up on whichever
+  // call happens to be first — approve, faucet, placeBinaryOrder or redeem.
+  // Matching the specific prefixes missed placeBinaryOrder and left users reading
+  // raw SDK text, so this now matches the phrase on any write.
   if (
     has(probe, "insufficient funds for gas", "insufficient funds for intrinsic", "gas required exceeds") ||
-    has(probe, "approve reverted: Missing or invalid parameters") ||
-    has(probe, "faucet reverted: Missing or invalid parameters")
+    has(probe, "Missing or invalid parameters")
   ) {
     return {
-      title: "No STT for gas",
+      title: "Out of gas",
       detail:
-        "Signing needs a little Somnia testnet STT to pay gas. Fund this address from the Shannon faucet, or switch to the demo wallet.",
+        "This wallet doesn't hold enough Somnia testnet STT to pay for the transaction. Tap Fund this wallet to top it up.",
       kind: "insufficient-gas",
       raw,
     };

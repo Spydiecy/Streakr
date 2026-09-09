@@ -66,7 +66,11 @@ if (gated) {
 }
 
 console.log("\n6. signing the call");
-await tapBigButton(page, "Sign & Submit Call", 30, 120);
+// Must match CallSheet's confirm PillButton. This read "Sign & Submit Call" —
+// the label on the old CallConfirmScreen — so after CallSheet replaced that
+// screen the tap silently missed and the check could never see a signed call.
+const tappedSign = await tapBigButton(page, "Sign & place call", 30, 120);
+console.log("  confirm tapped:", tappedSign);
 // A real signed tx plus receipt confirmation; the SDK confirms via newHeads.
 let settled = null;
 for (let i = 0; i < 30; i++) {

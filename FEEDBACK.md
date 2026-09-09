@@ -18,7 +18,7 @@ somewhere else.**
 Sections:
 
 1. [Blockers](#1-blockers) — stopped the product working for end users
-2. [Correctness traps](#2-correctness-traps) — code that looks right and silently isn't (10 findings)
+2. [Correctness traps](#2-correctness-traps) — code that looks right and silently isn't (11 findings)
 3. [Discoverability](#3-discoverability) — right answer exists, hard to find
 4. [Ecosystem](#4-ecosystem-liquidity) — liquidity
 5. [Suggested fixes, ranked](#5-suggested-fixes-ranked)
@@ -343,6 +343,77 @@ The bot-kit's own comments say this clearly — credit where due — but it's th
 of thing worth stating in the *first* Event Contracts doc a developer reads, not
 in a source comment they may never open.
 
+**What this looks like to an end user**, which is what made us treat it as a bug
+rather than a footnote. Our settlement poller correctly detected a win, recorded
+the payout, awarded XP and posted to Telegram:
+
+```
+🔥 0xeACe…d62F called BTC DOWN 15m and won
+Returned 14.58 tUSDC
+```
+
+The wallet balance did not move. Reading the position directly:
+
+```
+won BTC down 15m
+  recorded payout    : 14.577 tUSDC
+  winning tokens HELD: 14.577
+  market resolved    : true, voided: false
+```
+
+Everything is correct and consistent, and the user is still convinced the app
+lost their money. The gap between "you won 14.58" and "you hold 14.58 winning
+tokens that are worth 14.58 once redeemed" is invisible unless you already know
+Event Contracts don't auto-settle.
+
+For any consumer-facing app this means **redemption is a required UI surface, not
+an optional one** — we had to add an explicit per-position Claim action
+(`app/src/components/ClaimRow.tsx`). Two things would have saved us the confusion:
+
+1. A worked "settle → redeem" example in the Event Contracts quickstart, next to
+   the order-placing example. Every quickstart shows how to open a position and
+   none show how to close the loop.
+2. `getMarketOnchain` returning something like `claimableFor(account)`, so
+   "is there money owed to this address" is one call rather than: resolve the
+   market, pick the winning leg by index, read that leg's ERC-1155 balance, and
+   scale it by the market's decimals.
+
+A smaller related trap: `trader.redeem()` takes `amount` in **outcome tokens**,
+and the amount you want is the winning leg's balance — not the stake, and not the
+payout figure you displayed. We passed the stake first, which under-redeems
+silently and leaves the remainder stranded. This is the same units confusion as
+§2.4, in a second place.
+
+---
+
+### 2.11 Running out of gas mid-session reverts with "Missing or invalid parameters"
+
+A wallet with enough STT for two writes and a user who wants a third gets:
+
+```
+placeBinaryOrder reverted: Missing or invalid parameters
+```
+
+That string is JSON-RPC error `-32000` from the node, and it does not mean any
+parameter is missing. It means the sender cannot cover
+`gasLimit × maxFeePerGas` — the transaction never reaches the contract. Combined
+with §1.2 (writes cost ~30× what EVM intuition predicts) and §1.1 (the SDK pins
+`maxFeePerGas` at 60 gwei), a wallet that looks funded runs dry quickly:
+
+```
+STT: 0.04780901  →  writes affordable: 1   (0.024/write at a 2M ceiling × 12 gwei)
+```
+
+The user-visible symptom is "the app won't let me place calls sometimes",
+intermittent and correlated with nothing they can see. We now compute affordable
+writes from the balance and top wallets up before they hit the floor, but the
+error string is what made this take hours instead of minutes — we went looking
+for a malformed order payload, which is exactly what it says to look for.
+
+A node-side message naming the actual cause, or an SDK preflight that compares
+balance against `gasLimit × maxFeePerGas` before submitting, would remove this
+entirely.
+
 ---
 
 ## 3 · Discoverability
@@ -450,9 +521,13 @@ If only a few of these are actioned, we'd argue for this order:
 6. **One browser-wallet example.** (3.2) Unblocks every consumer app.
 7. **Throw on reverted receipts.** (2.5) Prevents recording failed transactions as
    successful.
-8. **Brand collateral units apart from outcome-token units.** (2.4) Confusing them
-   produces a wrong payout that looks entirely plausible, with nothing to catch
-   it — the two are the same primitive type at the same decimals.
+8. **Brand collateral units apart from outcome-token units.** (2.4, 2.10) Confusing
+   them produces a wrong payout that looks entirely plausible, with nothing to
+   catch it — the two are the same primitive type at the same decimals. It bit us
+   twice, in `estPayoutFor` and again in `redeem`.
+9. **Show redemption in the quickstart, and expose `claimableFor(account)`.** (2.10)
+   Every quickstart opens a position; none close one. For a consumer app the
+   missing redeem step reads as the app losing the user's money.
 
 ---
 

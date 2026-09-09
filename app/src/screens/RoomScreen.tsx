@@ -40,6 +40,7 @@ import { Chip } from "../components/ui/Chip";
 import { Toggle } from "../components/ui/Toggle";
 import { PillButton } from "../components/ui/PillButton";
 import { Icon, type IconName } from "../components/ui/Icon";
+import { ScrollBox } from "../components/ui/ScrollBox";
 import { colors, radius, font, spacing, shadow } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Room">;
@@ -513,7 +514,10 @@ export default function RoomScreen({ route, navigation }: Props) {
           {calls.length === 0 ? (
             <Text style={styles.boardEmpty}>No calls in this room yet. Make the first one.</Text>
           ) : (
-            calls.slice(0, 12).map((c, i) => {
+            <ScrollBox maxHeight={320}>
+            {/* The old cap of 12 existed only to stop the list eating the page.
+                Now that it scrolls in place, show a real slice of history. */}
+            {calls.slice(0, 60).map((c, i) => {
               const mine = !!session && c.uid === session.user.uid;
               const up = c.direction === "up";
               const amount = callResultAmount(c);
@@ -551,7 +555,8 @@ export default function RoomScreen({ route, navigation }: Props) {
                   />
                 </View>
               );
-            })
+            })}
+            </ScrollBox>
           )}
         </Card>
 
@@ -564,7 +569,10 @@ export default function RoomScreen({ route, navigation }: Props) {
           {board.length === 0 ? (
             <Text style={styles.boardEmpty}>No calls settled here yet.</Text>
           ) : (
-            board.map((e, i) => (
+            /* Same treatment — a room with 40 players shouldn't push the page
+               height past what the call list already needed. */
+            <ScrollBox maxHeight={300}>
+            {board.map((e, i) => (
               <View key={e.uid} style={[styles.brow, i > 0 && styles.browLine]}>
                 <View style={[styles.rank, i < 3 && styles.rankTop]}>
                   <Text style={[styles.rankT, i < 3 && styles.rankTT]}>{i + 1}</Text>
@@ -573,7 +581,8 @@ export default function RoomScreen({ route, navigation }: Props) {
                 <View style={styles.bstreakWrap}><Icon name="streak" size={12} color={colors.gold} /><Text style={styles.bstreak}>{e.currentStreak}</Text></View>
                 <Text style={styles.bxp}>{e.xp} XP</Text>
               </View>
-            ))
+            ))}
+            </ScrollBox>
           )}
         </Card>
       </ScrollView>
