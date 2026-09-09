@@ -13,6 +13,7 @@ import { useWallet } from "../lib/WalletProvider";
 import { createRoom, joinRoom, listPublicRooms, deleteRoom, countRoomCalls, type RoomCallCount } from "../lib/firestoreApi";
 import { prewarmMarkets } from "../lib/eventContracts";
 import { friendlyErrorLine } from "../lib/errors";
+import { reportFirestoreError, reportFirestoreOk } from "../lib/firestoreHealth";
 import type { RoomDoc } from "../lib/types";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
@@ -55,6 +56,11 @@ export default function RoomListScreen({ navigation }: Props) {
   const load = useCallback(async () => {
     try {
       setRooms(await listPublicRooms());
+      reportFirestoreOk();
+    } catch (e) {
+      // Feeds the app-wide connectivity banner. A blocked or offline Firestore
+      // otherwise just looks like "there are no rooms".
+      reportFirestoreError(e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -135,6 +141,7 @@ export default function RoomListScreen({ navigation }: Props) {
       navigation.navigate("Room", { roomId: id });
     } catch (e) {
       setCreateErr(friendlyErrorLine(e));
+      reportFirestoreError(e);
     } finally {
       setCreating(false);
     }

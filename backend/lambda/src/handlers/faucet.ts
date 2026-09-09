@@ -35,8 +35,26 @@ const RPC = "https://api.infra.testnet.somnia.network";
 const COLLATERAL = "0x70a86D8842FB63C4Ad2b7cdddF530eBf1BB25d8E" as const;
 const DECIMALS = 6;
 
-/** Gas grant. Enough for several calls — a placeOrder costs roughly 0.005 STT. */
-const STT_GRANT = parseEther(process.env.FAUCET_STT ?? "0.02");
+/**
+ * Gas grant.
+ *
+ * Sized against `gasLimit x maxFeePerGas`, not against gas actually burned — a
+ * node requires the sender to hold that product before it will accept a
+ * transaction at all, however little the call ends up using.
+ *
+ * The app signs at a 2,000,000 ceiling and 12 gwei (TX_GAS_CEILING and
+ * TX_MAX_FEE_PER_GAS in app/src/lib/chain.ts), so each write needs 0.024 STT
+ * present. A first call makes two — the one-off collateral approve, measured at
+ * 1,389,617 gas, then the order — so 0.08 STT covers that plus a couple more
+ * calls.
+ *
+ * Undersizing this does NOT fail as "out of gas". The node refuses the
+ * transaction before submission and the SDK reports it as
+ * "approve reverted: Missing or invalid parameters", which points nowhere near
+ * the real cause. Oversizing the ceiling instead fails the same way. See
+ * chain-integration/scripts/measure-gas.ts and measure-fees.ts.
+ */
+const STT_GRANT = parseEther(process.env.FAUCET_STT ?? "0.08");
 /** Collateral grant, in whole tUSDC. Covers the $5–$50 stake buttons. */
 const USDC_GRANT = BigInt(Math.round(Number(process.env.FAUCET_USDC ?? "150") * 10 ** DECIMALS));
 /** Refuse to grant if the treasury would drop below this much gas. */

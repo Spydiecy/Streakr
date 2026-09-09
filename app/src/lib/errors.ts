@@ -86,7 +86,15 @@ export function friendlyError(e: unknown): FriendlyError {
   }
 
   // ── Gas ─────────────────────────────────────────────────────────────────
-  if (has(probe, "insufficient funds for gas", "insufficient funds for intrinsic", "gas required exceeds")) {
+  // "Missing or invalid parameters" (JSON-RPC -32602) is what Shannon returns
+  // when the sender can't cover `gasLimit x gasPrice`. It reads like a client
+  // bug and sent us looking at ABI encoding; it is really an underfunded wallet.
+  // Matched on the SDK's wrapper text for the two writes that hit it first.
+  if (
+    has(probe, "insufficient funds for gas", "insufficient funds for intrinsic", "gas required exceeds") ||
+    has(probe, "approve reverted: Missing or invalid parameters") ||
+    has(probe, "faucet reverted: Missing or invalid parameters")
+  ) {
     return {
       title: "No STT for gas",
       detail:

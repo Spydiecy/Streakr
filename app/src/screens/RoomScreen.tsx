@@ -11,6 +11,7 @@ import { useSession } from "../lib/SessionContext";
 import { subscribeRoom, subscribeLeaderboard, setRoomActiveMarket } from "../lib/firestoreApi";
 import { listLiveMarkets, availableWindows, type LiveMarketInfo } from "../lib/eventContracts";
 import { friendlyErrorLine } from "../lib/errors";
+import { reportFirestoreError, reportFirestoreOk } from "../lib/firestoreHealth";
 import { fetchSentiment } from "../lib/sentimentApi";
 import type { LeaderboardEntryDoc, RoomDoc, Symbol_, WindowLength } from "../lib/types";
 import { Countdown } from "../components/Countdown";
@@ -67,6 +68,9 @@ export default function RoomScreen({ route, navigation }: Props) {
    */
   const reqIdRef = useRef(0);
 
+  /** Last `activeMarket` value actually written, so identical writes are skipped. */
+  const publishedRef = useRef<string | null>(null);
+
   const loadMarket = useCallback(async () => {
     const reqId = ++reqIdRef.current;
     const isStale = () => reqId !== reqIdRef.current;
@@ -94,12 +98,37 @@ export default function RoomScreen({ route, navigation }: Props) {
 
       setLoadedFor(symbol);
 
-      if (found && session && effective) {
-        await setRoomActiveMarket(roomId, {
-          symbol,
-          window: effective,
-          positionMarketId: found.marketId,
-        }).catch(() => {});
+      // Publish which market this room is watching — the pre-lock nudge Lambda
+      // reads it to know who to ping.
+      //
+      // Two guards, both of which were missing and together produced a stream of
+      // failing writes (one per toggle AND one per 15s poll, forever):
+      //
+      //   1. Only the creator may write `activeMarket` — firestore.rules allows
+      //      a non-creator exactly one kind of update, appending themselves to
+      //      memberUids. So for every other member this call was rejected with
+      //      permission-denied on every single poll, silently swallowed by a
+      //      bare .catch().
+      //   2. Only write when it actually changed. Re-writing the same value
+      //      every 15s burns quota and, when requests are being blocked, buries
+      //      the console in ERR_BLOCKED_BY_CLIENT.
+      const isOwner = !!session && !!room && room.createdBy === session.user.uid;
+      if (found && effective && isOwner) {
+        const next = `${symbol}:${effective}:${found.marketId}`;
+        if (publishedRef.current !== next) {
+          try {
+            await setRoomActiveMarket(roomId, {
+              symbol,
+              window: effective,
+              positionMarketId: found.marketId,
+            });
+            publishedRef.current = next;
+            reportFirestoreOk();
+          } catch (e) {
+            // Don't cache on failure, so it retries on the next change.
+            reportFirestoreError(e);
+          }
+        }
       }
     } catch (e) {
       if (isStale()) return;

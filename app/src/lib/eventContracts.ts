@@ -16,6 +16,7 @@ import {
   createReadOnlyExchange,
   createSignerExchange,
   createWalletClientExchange,
+  createTrader,
   deployment,
   NETWORK,
   VENUE_ID,
@@ -305,7 +306,11 @@ export async function mintTestCollateral(signer: CallSigner): Promise<string> {
     signer.kind === "embedded"
       ? createSignerExchange(signer.privateKey)
       : createWalletClientExchange(signer.walletClient);
-  const res = await exchange.trader.faucet();
+  const trader = createTrader(
+    exchange,
+    signer.kind === "embedded" ? { privateKey: signer.privateKey } : { walletClient: signer.walletClient },
+  );
+  const res = await trader.faucet();
   return res.hash ?? "";
 }
 
@@ -397,7 +402,14 @@ export async function placeCall(
     }
   }
 
-  const res = await exchange.trader.placeOrder({
+  // Explicit trader so the gas ceiling covers the SDK's internal collateral
+  // approve as well as the order itself — see TX_GAS_CEILING in chain.ts.
+  const trader = createTrader(
+    exchange,
+    signer.kind === "embedded" ? { privateKey: signer.privateKey } : { walletClient: signer.walletClient },
+  );
+
+  const res = await trader.placeOrder({
     pool: info.onchain.pool,
     side: outcome === "YES" ? "BUY_YES" : "BUY_NO",
     price: priceYes,

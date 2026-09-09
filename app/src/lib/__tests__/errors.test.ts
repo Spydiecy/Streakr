@@ -58,6 +58,21 @@ const cases: Case[] = [
     mustContain: ["STT"],
   },
   {
+    // Shannon returns -32602 rather than a clear "insufficient funds" when the
+    // sender can't cover gasLimit x gasPrice, and the SDK wraps it like this.
+    // Reads as an encoding bug; is actually an underfunded wallet.
+    name: "gas ceiling unaffordable, reported as invalid params (approve)",
+    input: new Error("approve reverted: Missing or invalid parameters. Double check you have provided the correct parameters."),
+    expectKind: "insufficient-gas",
+    mustContain: ["STT"],
+  },
+  {
+    name: "gas ceiling unaffordable, reported as invalid params (faucet)",
+    input: new Error("faucet reverted: Missing or invalid parameters."),
+    expectKind: "insufficient-gas",
+    mustContain: ["STT"],
+  },
+  {
     name: "IOC no fill",
     input: new Error("order did not fill — the book likely moved; try again"),
     expectKind: "no-liquidity",

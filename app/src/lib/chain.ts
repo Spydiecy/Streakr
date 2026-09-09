@@ -10,7 +10,8 @@
 
 import "react-native-get-random-values"; // must be imported before viem/wallet code on RN
 import { SomniaMarkets, SOMNIA_TESTNET_PRICE_FEED } from "@somnia-chain/markets-sdk";
-import { defineChain, type Chain } from "viem";
+import { createWalletClient, defineChain, http, type Chain, type WalletClient } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { NETWORK, COLLATERAL_DECIMALS, type Network } from "./networkConfig";
 
 // Re-exported so existing importers of `NETWORK` / `Network` from this module
@@ -145,6 +146,115 @@ export function createWalletClientExchange(walletClient: unknown): SomniaMarkets
     priceFeed: NETWORK === "testnet" ? SOMNIA_TESTNET_PRICE_FEED : undefined,
     walletClient: walletClient as any,
   } as any);
+}
+
+/**
+ * Gas ceiling for the app's transactions.
+ *
+ * The SDK defaults to 10,000,000 per write. That is not just wasteful — it is a
+ * hard funding gate, because a node requires the sender to hold
+ * `gasLimit x gasPrice` up front regardless of what the transaction actually
+ * burns. At Shannon's 6 gwei that default demands 0.06 STT sitting in the wallet
+ * for every single write.
+ *
+ * That made small wallets unusable in a way that pointed nowhere near gas: the
+ * RPC rejects the transaction with `-32602`, which the SDK surfaces as
+ * "approve reverted: Missing or invalid parameters". The project treasury never
+ * hit it because it holds ~1 STT.
+ *
+ * The ceiling has to clear what these writes genuinely cost, and on Somnia that
+ * is far more than EVM intuition suggests — the collateral `approve` alone
+ * estimates at 1,389,617 gas (the chain's block limit is 15 billion, so its gas
+ * schedule is not Ethereum's). Measured with scripts/measure-gas.ts in
+ * chain-integration.
+ *
+ * Both directions fail, and both mislead:
+ *   too low   a 400,000 ceiling burned all 400,000 and reverted out of gas,
+ *             reported as "reverted (no revert data recoverable)"
+ *   too high  the transaction is refused before submission with JSON-RPC
+ *             -32000, surfaced as "Missing or invalid parameters" — which reads
+ *             like malformed calldata rather than a funding problem
+ *
+ * 4M leaves roughly 3x headroom over the approve for the order itself, while
+ * keeping the required balance at ~0.032 STT per write at the current base fee.
+ */
+export const TX_GAS_CEILING = 2_000_000n;
+
+/**
+ * Fee the app signs with, replacing the SDK's fixed 60 gwei.
+ *
+ * The SDK pins `maxFeePerGas` at 60 gwei — 10x Shannon's 6 gwei base fee — on
+ * every path, including when it's handed a viem WalletClient that would
+ * otherwise estimate ~7.2 gwei. Because a node requires the sender to hold
+ * `gasLimit x maxFeePerGas` before it will accept a transaction, that fixed
+ * markup multiplies the balance a wallet must sit on by 10 for no benefit: at a
+ * 2M ceiling it's 0.12 STT instead of 0.024 STT.
+ *
+ * On a treasury that has no self-serve refill, that is the difference between
+ * funding a couple of demo wallets and funding dozens.
+ *
+ * 2x the base fee is ample headroom on a chain whose base fee has been flat at
+ * 6 gwei. It does need to stay above the base fee — if Shannon's ever rises past
+ * this, transactions will be rejected as underpriced.
+ */
+export const TX_MAX_FEE_PER_GAS = 12n * 10n ** 9n;
+
+/**
+ * Wrap a WalletClient so every write it sends carries TX_MAX_FEE_PER_GAS.
+ *
+ * A proxy rather than a spread copy: the SDK reaches for several members of the
+ * client, and only the two write methods need rewriting. Fees are decided before
+ * the transport is involved, so this is the last point at which they can be
+ * changed — there's no transport-level hook that would work.
+ */
+function withFeeOverride(client: WalletClient): WalletClient {
+  const fees = { maxFeePerGas: TX_MAX_FEE_PER_GAS, maxPriorityFeePerGas: 0n };
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      if (prop === "sendTransaction" || prop === "writeContract") {
+        const fn = (target as any)[prop].bind(target);
+        return (args: any) => fn({ ...args, ...fees });
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as WalletClient;
+}
+
+/**
+ * A Trader with that ceiling applied as its default.
+ *
+ * Built explicitly rather than using `exchange.trader`, because the ceiling has
+ * to cover writes the SDK issues internally — the collateral `approve` that
+ * precedes a first order is the one that actually failed, and a per-call `gas`
+ * override cannot reach it.
+ */
+export function createTrader(exchange: SomniaMarkets, signer: { privateKey: `0x${string}` } | { walletClient: unknown }) {
+  // Always go through a viem WalletClient, even when we hold the key.
+  //
+  // The SDK's own local-signing path is faster (fixed fees, locally-tracked
+  // nonce, one round-trip) but it signs with maxFeePerGas pinned at 60 gwei —
+  // 10x Shannon's 6 gwei base. Since a node requires the sender to hold
+  // `gasLimit x maxFeePerGas` before it will accept a transaction at all, that
+  // fixed 60 gwei multiplies the balance a wallet must sit on by ~8x for no
+  // benefit: at a 4M ceiling it's 0.24 STT rather than 0.032 STT.
+  //
+  // With a WalletClient, viem derives the fee from the current base fee, so the
+  // requirement tracks reality. On a treasury that can't be faucet-refilled that
+  // is the difference between funding a handful of demo wallets and dozens.
+  const base =
+    "privateKey" in signer
+      ? createWalletClient({
+          account: privateKeyToAccount(signer.privateKey),
+          chain: makeChain(),
+          transport: http(ENDPOINTS[NETWORK].rpc),
+        })
+      : (signer.walletClient as WalletClient);
+
+  return exchange.client.createTrader({
+    walletClient: withFeeOverride(base) as any,
+    decimals: deployment().decimals,
+    gas: TX_GAS_CEILING,
+  });
 }
 
 export function explorerTxUrl(hash: string): string {
