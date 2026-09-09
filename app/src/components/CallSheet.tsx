@@ -13,6 +13,7 @@ import {
   mintTestCollateral,
   type LiveMarketInfo,
 } from "../lib/eventContracts";
+import { bookQuality } from "../lib/quote";
 import { friendlyError, type FriendlyError } from "../lib/errors";
 import { requestFaucet, HAS_FAUCET } from "../lib/faucetApi";
 import { useWallet } from "../lib/WalletProvider";
@@ -51,6 +52,7 @@ export function CallSheet({ visible, market, direction, stake, onCancel, onPlace
 
   const isUp = direction === "up";
   const quote = market ? quoteFor(market, direction, stake) : null;
+  const quality = bookQuality(market ?? {});
 
   const refreshBalance = useCallback(() => {
     if (!wallet.address) return;
@@ -156,9 +158,18 @@ export function CallSheet({ visible, market, direction, stake, onCancel, onPlace
               value={quote ? `+${quote.profit.toFixed(2)} tUSDC (${quote.multiple.toFixed(2)}×)` : "—"}
             />
             <Row label="Loss if wrong" value={`−${stake.toFixed(2)} tUSDC`} />
+            {/* Only call it a chance when the book can support that reading. On a
+                one-sided book the price is just what one participant will sell
+                at, so it's labelled as a price and the payout does the talking. */}
             <Row
-              label="Implied chance"
-              value={quote ? `${Math.round(quote.price * 100)}%` : "—"}
+              label={quality.chanceIsMeaningful ? "Implied chance" : "Price per share"}
+              value={
+                quote
+                  ? quality.chanceIsMeaningful
+                    ? `${Math.round(quote.price * 100)}%`
+                    : quote.price.toFixed(3)
+                  : "—"
+              }
             />
             <Row
               label="Wallet"
@@ -174,6 +185,14 @@ export function CallSheet({ visible, market, direction, stake, onCancel, onPlace
               Downside is capped at your stake — the Event Contract can't take more.
             </Text>
           </View>
+
+          {!quality.chanceIsMeaningful && quote ? (
+            <Text style={styles.thin}>
+              {quality.twoSided
+                ? "Thin book — the two sides don't line up, so treat this price as one order rather than a market view."
+                : "Only this side is quoted right now, so the price is a single resting order rather than a market view."}
+            </Text>
+          ) : null}
 
           {err ? (
             <View style={styles.note}>
@@ -299,6 +318,7 @@ const styles = StyleSheet.create({
   noteT: { ...font.body, fontSize: 13.5, fontWeight: "800", color: colors.down },
   noteB: { ...font.bodySm, fontSize: 12.5, color: colors.textMuted, marginTop: 2, lineHeight: 17 },
 
+  thin: { ...font.bodySm, fontSize: 11, color: colors.gold, marginTop: spacing(3), lineHeight: 15 },
   hint: { ...font.bodySm, fontSize: 11.5, color: colors.textFaint, textAlign: "center", marginTop: spacing(2), lineHeight: 16 },
   cancel: { alignItems: "center", paddingVertical: spacing(3), marginTop: spacing(1) },
   cancelT: { ...font.body, color: colors.textFaint, fontWeight: "700" },

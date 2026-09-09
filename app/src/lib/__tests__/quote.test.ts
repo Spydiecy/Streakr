@@ -13,7 +13,7 @@
  *
  *   npm run test         (from app/)
  */
-import { askFor, quoteFor, type BookSide } from "../quote";
+import { askFor, quoteFor, bookQuality, type BookSide } from "../quote";
 
 const market = (b: BookSide): BookSide => b;
 
@@ -63,5 +63,48 @@ check("no ask on a leg yields no quote", quoteFor(oneSided, "down", 5) === null)
 check("a quote still exists for the priced leg", quoteFor(oneSided, "up", 5) !== null);
 check("a zero price yields no quote", quoteFor(market({ noAsk: 0 }), "down", 5) === null);
 
-console.log(`\n${pass} passed, ${fail} failed`);
+
+// ── bookQuality: when can a price be read as a likelihood? ──────────────────
+//
+// Observed live and the reason this exists: a BTC 15m market with NO asks at
+// 0.020 and NO yes asks at all. Presented as "DOWN CHANCE 2%" that reads as a
+// market consensus, when it is one participant's resting order with nothing to
+// cross-check against — and the payout at that price is ~50x on a coin flip.
+const bq = bookQuality;
+
+const qualityCases: [string, BookSide, boolean, boolean][] = [
+  // label, book, twoSided, chanceIsMeaningful
+  ["healthy two-sided market (0.623 / 0.406, sums 103%)", { yesAsk: 0.623, noAsk: 0.406 }, true, true],
+  ["tight market summing to exactly 100%", { yesAsk: 0.5, noAsk: 0.5 }, true, true],
+  ["the reported 15m book: only NO quoted", { noAsk: 0.02 }, false, false],
+  ["only YES quoted", { yesAsk: 0.62 }, false, false],
+  ["neither leg quoted", {}, false, false],
+  ["both quoted but nowhere near complementary", { yesAsk: 0.02, noAsk: 0.02 }, true, false],
+  ["both quoted but summing far above 1", { yesAsk: 0.9, noAsk: 0.9 }, true, false],
+  ["extreme but internally consistent (ETH 4h: 3% / 99%)", { yesAsk: 0.025, noAsk: 0.994 }, true, true],
+];
+
+for (const [label, book, wantTwoSided, wantMeaningful] of qualityCases) {
+  const q = bq(book);
+  check(
+    `bookQuality: ${label}`,
+    q.twoSided === wantTwoSided && q.chanceIsMeaningful === wantMeaningful,
+    `twoSided=${q.twoSided} (want ${wantTwoSided}), chanceIsMeaningful=${q.chanceIsMeaningful} (want ${wantMeaningful}), askSum=${q.askSum}`,
+  );
+}
+
+// The specific misleading case must be refused outright.
+check(
+  "a lone 0.020 ask is NOT presented as a 2% chance",
+  bq({ noAsk: 0.02 }).chanceIsMeaningful === false,
+);
+
+// An extreme price is fine when the book corroborates it — the guard is about
+// corroboration, not about hiding unusual numbers.
+check(
+  "an extreme price is allowed when both legs agree",
+  bq({ yesAsk: 0.025, noAsk: 0.994 }).chanceIsMeaningful === true,
+);
+
+console.log(`\n${pass} passed, ${fail} failed  (including bookQuality)`);
 process.exit(fail === 0 ? 0 : 1);

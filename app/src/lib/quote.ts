@@ -61,3 +61,46 @@ export function quoteFor(book: BookSide, direction: Direction, stake: number): Q
 export function impliedChance(price?: number): string {
   return price === undefined ? "—" : `${Math.round(price * 100)}%`;
 }
+
+/** Payout per unit staked, e.g. "50.0x". */
+export function payoutMultiple(price?: number): string {
+  if (price === undefined || price <= 0) return "—";
+  const m = 1 / price;
+  return m >= 10 ? `${Math.round(m)}x` : `${m.toFixed(2)}x`;
+}
+
+export interface BookQuality {
+  /** Both legs have a resting ask, so the two prices can be cross-checked. */
+  twoSided: boolean;
+  /** yesAsk + noAsk. A tight market sits a little over 1.00 (the spread). */
+  askSum: number | null;
+  /**
+   * Whether an ask price can be read as a market's view of likelihood.
+   *
+   * Only when both legs are quoted AND they roughly complement each other. On a
+   * one-sided book there is nothing to cross-check against, so a lone ask says
+   * only "this is what one participant will sell at" — not "this is how likely it
+   * is". Presenting 0.02 as a "2% chance" on a 15-minute coin flip is the visible
+   * symptom of that, and it is materially misleading: at that price the payout is
+   * ~50x on something far closer to even money.
+   */
+  chanceIsMeaningful: boolean;
+}
+
+/**
+ * How much the book can be trusted to imply a probability.
+ *
+ * The venue's flagship series are frequently quoted on one side only — measured
+ * repeatedly, and several other teams reported the same. See
+ * chain-integration/scripts/inspect-book.ts, which prints every resting level.
+ */
+export function bookQuality(book: BookSide): BookQuality {
+  const { yesAsk, noAsk } = book;
+  const twoSided = yesAsk !== undefined && noAsk !== undefined;
+  const askSum = twoSided ? yesAsk! + noAsk! : null;
+  // A genuine two-sided market's asks sum to just over 1 — the excess is the
+  // spread. Well outside that band means the quotes aren't complementary and
+  // shouldn't be read as probabilities.
+  const chanceIsMeaningful = askSum !== null && askSum >= 0.95 && askSum <= 1.25;
+  return { twoSided, askSum, chanceIsMeaningful };
+}

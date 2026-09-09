@@ -23,6 +23,7 @@ import {
   quoteFor,
   type LiveMarketInfo,
 } from "../lib/eventContracts";
+import { bookQuality, payoutMultiple } from "../lib/quote";
 import { CallSheet } from "../components/CallSheet";
 import { callResultAmount } from "../lib/callOutcome";
 import { friendlyErrorLine } from "../lib/errors";
@@ -200,6 +201,9 @@ export default function RoomScreen({ route, navigation }: Props) {
   const market =
     rawMarket && rawMarket.symbol === symbol && rawMarket.window === win ? rawMarket : null;
 
+  // Whether the book supports reading a price as a likelihood at all.
+  const quality = bookQuality(market ?? {});
+
   const windowOptions = availableWindows(allMarkets, symbol).map((w) => ({ value: w, label: w }));
   const closed = !market || market.secondsLeft <= 0;
   const totalSec = market?.intervalSec && market.intervalSec > 0 ? market.intervalSec : 3600;
@@ -330,23 +334,40 @@ export default function RoomScreen({ route, navigation }: Props) {
                   <Chip label={closed ? "Locked" : "Live"} tone={closed ? "neutral" : "up"} icon="live" align="start" />
                   <Text style={styles.marketSym}>{symbol}</Text>
                   <Text style={styles.marketId} numberOfLines={1}>{market.label}</Text>
-                  {/* Implied chance rather than the raw ask. They're the same
-                      number — a 0.82 ask is an 82% implied chance — but a
-                      percentage is immediately readable, whereas "0.821" invites
-                      the question this display kept provoking: why does the
-                      cheaper side pay more? The two won't sum to 100% because
-                      both are ask prices, and the gap is the spread. */}
+                  {/* Payout multiple is the headline because it is always true:
+                      it's arithmetic on the price you'd actually pay. The implied
+                      chance sits underneath, and ONLY when the book is two-sided
+                      and the asks roughly complement each other.
+                      
+                      On a one-sided book a lone 0.020 ask is not "a 2% chance" —
+                      there's nothing on the other leg to cross-check it against,
+                      so it means only "someone will sell at 0.020". Labelling
+                      that as a chance on a 15-minute coin flip actively misleads. */}
                   <View style={styles.book}>
                     <View>
-                      <Text style={styles.bookL}>Up chance</Text>
-                      <Text style={styles.bookV}>{pct(market.yesAsk)}</Text>
+                      <Text style={styles.bookL}>Up pays</Text>
+                      <Text style={styles.bookV}>{payoutMultiple(market.yesAsk)}</Text>
+                      {quality.chanceIsMeaningful ? (
+                        <Text style={styles.bookSub}>{pct(market.yesAsk)} chance</Text>
+                      ) : null}
                     </View>
                     <View style={styles.bookSep} />
                     <View>
-                      <Text style={styles.bookL}>Down chance</Text>
-                      <Text style={styles.bookV}>{pct(market.noAsk)}</Text>
+                      <Text style={styles.bookL}>Down pays</Text>
+                      <Text style={styles.bookV}>{payoutMultiple(market.noAsk)}</Text>
+                      {quality.chanceIsMeaningful ? (
+                        <Text style={styles.bookSub}>{pct(market.noAsk)} chance</Text>
+                      ) : null}
                     </View>
                   </View>
+
+                  {!quality.chanceIsMeaningful ? (
+                    <Text style={styles.thin}>
+                      {quality.twoSided
+                        ? "Thin book — the two sides don't line up, so these prices aren't a reliable read on likelihood."
+                        : "Only one side is quoted right now, so the price reflects a single resting order rather than a market view."}
+                    </Text>
+                  ) : null}
                 </View>
                 <Countdown closesAtSec={Number(market.onchain.expiry)} totalSec={totalSec} onExpire={loadMarket} size={124} />
               </View>
@@ -554,7 +575,9 @@ const styles = StyleSheet.create({
   book: { flexDirection: "row", alignItems: "center", gap: spacing(4), marginTop: spacing(3.5) },
   bookL: { ...font.label, color: colors.textFaint, textTransform: "uppercase" },
   bookV: { ...font.mono, fontSize: 17, color: colors.text, marginTop: 2 },
-  bookSep: { width: 1, height: 28, backgroundColor: colors.border },
+  bookSub: { ...font.bodySm, fontSize: 10.5, color: colors.textFaint, marginTop: 1 },
+  bookSep: { width: 1, height: 34, backgroundColor: colors.border },
+  thin: { ...font.bodySm, fontSize: 10.5, color: colors.gold, marginTop: spacing(2.5), lineHeight: 14.5 },
   loadingWrap: { alignItems: "center", gap: spacing(3), paddingVertical: spacing(9) },
   loadingText: { ...font.bodySm, color: colors.textFaint },
   err: { color: colors.down, textAlign: "center", lineHeight: 20 },

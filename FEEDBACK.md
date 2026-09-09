@@ -18,7 +18,7 @@ somewhere else.**
 Sections:
 
 1. [Blockers](#1-blockers) — stopped the product working for end users
-2. [Correctness traps](#2-correctness-traps) — code that looks right and silently isn't (9 findings)
+2. [Correctness traps](#2-correctness-traps) — code that looks right and silently isn't (10 findings)
 3. [Discoverability](#3-discoverability) — right answer exists, hard to find
 4. [Ecosystem](#4-ecosystem-liquidity) — liquidity
 5. [Suggested fixes, ranked](#5-suggested-fixes-ranked)
@@ -157,7 +157,46 @@ snapped seconds too would remove the trap entirely.
 
 ---
 
-### 2.2 The NO leg cannot be priced as `1 − yesBid`
+### 2.2 One-sided books make an ask price unreadable as a probability
+
+An ask price is normally interpretable as an implied likelihood — a 0.62 ask is
+"the market thinks ~62%". That reading only holds when **both** legs are quoted
+and roughly complement each other.
+
+On this venue they frequently aren't. Measured with
+`chain-integration/scripts/inspect-book.ts` on a live BTC 15-minute market:
+
+```
+BTC 15m   YES asks: (empty)
+          NO  asks: 0.020 x200   0.028 x330   0.035 x460
+          NO  bids: (empty)
+```
+
+Compare a healthy series minutes later:
+
+```
+BTC 4h    YES asks: 0.623 x200 ...      -> 62%
+          NO  asks: 0.406 x200 ...      -> 41%    (sums to 103%, the spread)
+```
+
+The 15m book has a single participant selling NO at 0.020 and **nothing on the
+other leg**. Surfacing that as "2% chance" on a 15-minute coin flip is actively
+wrong — and the payout at that price is ~50x, which is the tell.
+
+This isn't an SDK defect, but it has a real consumer consequence: any app that
+maps ask → percentage will confidently display nonsense whenever the book is
+one-sided, which here is often. We now only present a chance when both legs are
+quoted and their asks sum within 0.95–1.25, and otherwise show the payout
+multiple with an explicit "only one side is quoted" note.
+
+**Suggested fix:** expose a book-quality or confidence signal alongside the top of
+book — even just "is this two-sided" — so consumers don't each have to work out
+that a lone ask can't be read as a probability. A house market maker (see §4)
+would remove the problem at source.
+
+---
+
+### 2.3 The NO leg cannot be priced as `1 − yesBid`
 
 This one produces *no error at all* — the order just never fills, which is the
 worst possible failure mode.
@@ -176,7 +215,7 @@ to make and gives no feedback when made.
 
 ---
 
-### 2.3 `estPayoutFor`'s `amount` is outcome tokens, and passing collateral fails silently
+### 2.4 `estPayoutFor`'s `amount` is outcome tokens, and passing collateral fails silently
 
 `estPayoutFor({ amount })` expects **outcome tokens**, not collateral. Pass the
 stake instead of the share count and it returns approximately the stake — because
@@ -201,7 +240,7 @@ this class of mistake unrepresentable.
 
 ---
 
-### 2.4 A reverted receipt still resolves successfully
+### 2.5 A reverted receipt still resolves successfully
 
 `placeOrder` resolves rather than throwing when the receipt status is `reverted`.
 A failed call therefore looks like a successful one unless the caller explicitly
@@ -220,7 +259,7 @@ discriminated result so the failure can't be ignored by omission.
 
 ---
 
-### 2.5 `loadMarkets()` is slow *and* hides live markets
+### 2.6 `loadMarkets()` is slow *and* hides live markets
 
 Measured with `chain-integration/scripts/profile-market-reads.ts`:
 
@@ -241,7 +280,7 @@ entry point and is the wrong one for this use case.
 
 ---
 
-### 2.6 Lot grid: documented default is wrong for the live venue
+### 2.7 Lot grid: documented default is wrong for the live venue
 
 `packages/ec-core/src/config.ts` documents testnet as having "no lot constraint in
 practice" (`MM_LOT=1`). Measured against the live Shannon venue, every order at
@@ -260,7 +299,7 @@ default `MM_LOT` to the observed venue value.
 
 ---
 
-### 2.7 Price feed timeframes are undocumented and fail at runtime
+### 2.8 Price feed timeframes are undocumented and fail at runtime
 
 `fetchPriceOHLCV` accepts only `1m`, `1h`, `1d`. Passing `"5m"` — a completely
 ordinary candle interval — throws *"unknown price timeframe"* at runtime. We had
@@ -274,7 +313,7 @@ state the mainnet gap in the docs.
 
 ---
 
-### 2.8 `venueId` moves, and nothing warns you
+### 2.9 `venueId` moves, and nothing warns you
 
 Venue IDs changed three times in the first week of August. Markets from every
 venue sit side by side in the indexer, so a stale `venueId` returns **zero rows**
@@ -288,7 +327,7 @@ market row rather than trusting this file" in our own `.env`.
 
 ---
 
-### 2.9 Settlement is invisible, and winnings don't arrive
+### 2.10 Settlement is invisible, and winnings don't arrive
 
 Two related behaviours that are correct but easy to miss:
 
@@ -409,9 +448,9 @@ If only a few of these are actioned, we'd argue for this order:
 5. **Expose a snapped `cadence`.** (2.1) Removes a whole class of silent
    market-dropping.
 6. **One browser-wallet example.** (3.2) Unblocks every consumer app.
-7. **Throw on reverted receipts.** (2.4) Prevents recording failed transactions as
+7. **Throw on reverted receipts.** (2.5) Prevents recording failed transactions as
    successful.
-8. **Brand collateral units apart from outcome-token units.** (2.3) Confusing them
+8. **Brand collateral units apart from outcome-token units.** (2.4) Confusing them
    produces a wrong payout that looks entirely plausible, with nothing to catch
    it — the two are the same primitive type at the same decimals.
 
