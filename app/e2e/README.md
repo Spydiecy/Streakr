@@ -31,8 +31,11 @@ Chrome is expected at the macOS default path; override with `CHROME=`.
 |---|---|
 | `flow.mjs` | Onboarding → display name → create room → room loads with live markets |
 | `switch.mjs` | Asset/window switching never shows stale data; window chips stay stable across poll cycles |
+| `roomfeed.mjs` | A placed call appears in the room feed, plus balance readout and refresh controls |
+| `fullcall.mjs` | The whole loop for real: funded wallet → live market → signed on-chain order |
 | `align.mjs` | Measures rendered box centres to find off-centre children and horizontal overflow |
 | `errpath.mjs` | The funding gate on an unfunded wallet, and that no raw SDK jargon reaches the screen |
+| `history.mjs` | Settled call rows explain the outcome, not just a WON/LOST badge |
 
 ```bash
 node e2e/flow.mjs    http://localhost:8899 430 900
