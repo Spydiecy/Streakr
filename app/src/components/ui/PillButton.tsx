@@ -93,16 +93,9 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.65 },
   row: { flexDirection: "row", alignItems: "center", gap: 7 },
   label: { fontWeight: "800", letterSpacing: -0.2 },
-  icon: {},
 });
 
 const sizeLabel = StyleSheet.create({
-  sm: { fontSize: 13 },
-  md: { fontSize: 15 },
-  lg: { fontSize: 17 },
-});
-
-const sizeIcon = StyleSheet.create({
   sm: { fontSize: 13 },
   md: { fontSize: 15 },
   lg: { fontSize: 17 },

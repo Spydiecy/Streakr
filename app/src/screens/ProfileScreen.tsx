@@ -80,7 +80,10 @@ export default function ProfileScreen({ navigation }: Props) {
               <Text style={styles.addr}>
                 {wallet.address ? `${wallet.address.slice(0, 10)}…${wallet.address.slice(-8)}` : "—"}
               </Text>
-              <Text style={styles.copy}>{copied ? "✓ copied" : "tap to copy"}</Text>
+              <View style={styles.copyRow}>
+                {copied ? <Icon name="check" size={11} color={colors.accentDeep} /> : null}
+                <Text style={styles.copy}>{copied ? "copied" : "tap to copy"}</Text>
+              </View>
             </Pressable>
 
             <View style={styles.stats}>
@@ -184,7 +187,8 @@ const styles = StyleSheet.create({
   name: { ...font.h2, color: colors.paperInk, marginTop: spacing(3) },
   addrWrap: { alignItems: "center", marginTop: spacing(2) },
   addr: { ...font.mono, fontSize: 12, color: colors.paperMuted },
-  copy: { fontSize: 10.5, fontWeight: "800", color: colors.accentDeep, marginTop: 3, textTransform: "uppercase" },
+  copyRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
+  copy: { fontSize: 10.5, fontWeight: "800", color: colors.accentDeep, textTransform: "uppercase" },
 
   stats: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",

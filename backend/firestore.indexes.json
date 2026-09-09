@@ -29,6 +29,15 @@
       ]
     },
     {
+      "//": "app/src/lib/firestoreApi.ts countRoomCalls — where(roomId ==) + where(status ==) as a count aggregation, for the room-delete confirmation copy.",
+      "collectionGroup": "calls",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "roomId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "//": "Kept for settlement-ordered history views (calls by room/user, newest settled first).",
       "collectionGroup": "calls",
       "queryScope": "COLLECTION",

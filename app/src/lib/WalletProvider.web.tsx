@@ -30,6 +30,7 @@ import {
 } from "@rainbow-me/rainbowkit/wallets";
 import { activeChain, WALLETCONNECT_PROJECT_ID, hasWalletConnectProjectId, WALLET_APP_NAME } from "./wagmi";
 import { loadOrCreateWallet, deleteWallet } from "./wallet";
+import { requestFaucet, HAS_FAUCET } from "./faucetApi";
 import type { CallSigner, WalletState } from "./walletTypes";
 import { colors } from "../theme";
 
@@ -71,6 +72,20 @@ function InnerProvider({ children }: { children: React.ReactNode }) {
     try {
       const w = await loadOrCreateWallet();
       setEmbedded(w);
+      // Fund it immediately. The key is generated in the browser, so it starts
+      // with 0 STT — and since STT is gas, it can't even send the collateral
+      // faucet's own transaction. Without this grant the wallet is unusable and
+      // "pre-funded demo wallet" would simply be untrue.
+      //
+      // Deliberately not awaited into the connect flow's critical path: the
+      // grant takes a few seconds of on-chain confirmations, and the user can
+      // browse rooms while it lands. The Call screen re-checks the balance and
+      // offers an explicit "Fund this wallet" button if it hasn't.
+      if (HAS_FAUCET) {
+        requestFaucet(w.address).catch((e) => {
+          console.warn("[wallet] initial funding failed, user can retry from the call screen:", e);
+        });
+      }
     } finally {
       setBusy(false);
     }

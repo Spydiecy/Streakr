@@ -10,8 +10,9 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
 import { useWallet } from "../lib/WalletProvider";
-import { createRoom, joinRoom, listPublicRooms, deleteRoom } from "../lib/firestoreApi";
+import { createRoom, joinRoom, listPublicRooms, deleteRoom, countRoomCalls, type RoomCallCount } from "../lib/firestoreApi";
 import { prewarmMarkets } from "../lib/eventContracts";
+import { friendlyErrorLine } from "../lib/errors";
 import type { RoomDoc } from "../lib/types";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
@@ -44,8 +45,12 @@ export default function RoomListScreen({ navigation }: Props) {
   const [roomName, setRoomName] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [creating, setCreating] = useState(false);
+  const [createErr, setCreateErr] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<RoomDoc | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // null while the count is still in flight, so the dialog can say "checking…"
+  // rather than claim the room is empty before it knows.
+  const [deleteCount, setDeleteCount] = useState<RoomCallCount | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -69,21 +74,56 @@ export default function RoomListScreen({ navigation }: Props) {
     navigation.navigate("Room", { roomId: room.roomId });
   };
 
+  /** Open the delete sheet and look up how much history the room actually holds. */
+  const askDelete = (room: RoomDoc) => {
+    setPendingDelete(room);
+    setDeleteCount(null);
+    countRoomCalls(room.roomId)
+      .then(setDeleteCount)
+      // A failed count shouldn't block the delete — fall back to the cautious
+      // wording by reporting an unknown-but-nonzero history.
+      .catch(() => setDeleteCount({ total: -1, pending: 0 }));
+  };
+
+  const closeDelete = () => {
+    setPendingDelete(null);
+    setDeleteCount(null);
+  };
+
   const confirmDelete = async () => {
     if (!pendingDelete) return;
     setDeleting(true);
     try {
       await deleteRoom(pendingDelete.roomId);
       setRooms((prev) => prev.filter((r) => r.roomId !== pendingDelete.roomId));
-      setPendingDelete(null);
+      closeDelete();
     } finally {
       setDeleting(false);
     }
   };
 
+  /**
+   * Delete copy depends on what's actually in the room. An empty room is
+   * throwaway; one with calls leaves on-chain records behind, and pending calls
+   * are live positions that keep settling after the room is gone — the user
+   * should know that before confirming, not after.
+   */
+  const deleteBody = (): string => {
+    if (deleteCount === null) return "Checking what's in this room…";
+    const { total, pending } = deleteCount;
+    if (total === 0) return "Nothing has been called here yet, so this removes the room completely.";
+    if (total < 0) return "The room and its leaderboard are removed. Calls already placed are kept as on-chain records.";
+    const calls = `${total} call${total === 1 ? "" : "s"}`;
+    if (pending > 0) {
+      return `This room has ${calls}, ${pending} still settling. The room and its leaderboard go away; the calls stay as on-chain records and will still settle to your streak.`;
+    }
+    return `This room has ${calls}. The room and its leaderboard are removed, but the calls are kept — they're records of real on-chain transactions.`;
+  };
+
   const create = async () => {
     if (!session || !roomName.trim()) return;
     setCreating(true);
+    setCreateErr(null);
     try {
       const id = await createRoom({
         name: roomName.trim(),
@@ -93,9 +133,16 @@ export default function RoomListScreen({ navigation }: Props) {
       setOpen(false);
       setRoomName("");
       navigation.navigate("Room", { roomId: id });
+    } catch (e) {
+      setCreateErr(friendlyErrorLine(e));
     } finally {
       setCreating(false);
     }
+  };
+
+  const closeCreate = () => {
+    setOpen(false);
+    setCreateErr(null);
   };
 
   return (
@@ -229,15 +276,19 @@ export default function RoomListScreen({ navigation }: Props) {
                         // Don't let the tap fall through and open the room.
                         e.stopPropagation?.();
                         Haptics.selectionAsync();
-                        setPendingDelete(item);
+                        askDelete(item);
                       }}
                       hitSlop={8}
+                      accessibilityLabel={`Delete room ${item.name}`}
+                      accessibilityRole="button"
                       style={styles.trash}
                     >
-                      <Icon name="close" size={15} color={colors.textFaint} />
+                      {/* A trash can, not an X — an X on a list row reads as
+                          "dismiss this from view" rather than "delete it". */}
+                      <Icon name="trash" size={15} color={colors.textFaint} />
                     </Pressable>
                   ) : null}
-                  <Text style={styles.chev}>›</Text>
+                  <Icon name="forward" size={18} color={colors.textFaint} />
                 </Card>
               )}
             </Pressable>
@@ -255,7 +306,7 @@ export default function RoomListScreen({ navigation }: Props) {
       ) : null}
 
       {/* Create sheet */}
-      <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
+      <Modal visible={open} animationType="slide" transparent onRequestClose={closeCreate}>
         <BlurView intensity={30} tint="dark" style={styles.overlay}>
           <View style={styles.sheet}>
             <View style={styles.grabber} />
@@ -278,7 +329,7 @@ export default function RoomListScreen({ navigation }: Props) {
               onChange={setVisibility}
             />
             <PillButton
-              label="Create room"
+              label={creating ? "Creating…" : "Create room"}
               onPress={create}
               loading={creating}
               disabled={!roomName.trim()}
@@ -286,7 +337,8 @@ export default function RoomListScreen({ navigation }: Props) {
               full
               style={{ marginTop: spacing(5) }}
             />
-            <Pressable onPress={() => setOpen(false)} style={styles.cancel}>
+            {createErr ? <Text style={styles.createErr}>{createErr}</Text> : null}
+            <Pressable onPress={closeCreate} style={styles.cancel}>
               <Text style={styles.cancelText}>Cancel</Text>
             </Pressable>
           </View>
@@ -296,11 +348,14 @@ export default function RoomListScreen({ navigation }: Props) {
       <ConfirmDialog
         visible={!!pendingDelete}
         title={`Delete "${pendingDelete?.name ?? ""}"?`}
-        body="The room and its leaderboard are removed. Settled calls are kept — they're records of real on-chain transactions."
-        confirmLabel={deleting ? "Deleting…" : "Delete room"}
+        body={deleteBody()}
+        confirmLabel={
+          deleting ? "Deleting…" : deleteCount?.total === 0 ? "Delete empty room" : "Delete room"
+        }
+        confirmDisabled={deleting || deleteCount === null}
         destructive
         onConfirm={confirmDelete}
-        onCancel={() => setPendingDelete(null)}
+        onCancel={closeDelete}
       />
     </Screen>
   );
@@ -356,7 +411,7 @@ const styles = StyleSheet.create({
     width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center",
     backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
   },
-  chev: { color: colors.textFaint, fontSize: 24, fontWeight: "300" },
+
 
   empty: { alignItems: "center", paddingVertical: spacing(9) },
   emptyTitle: { ...font.h3, color: colors.text },
@@ -382,4 +437,5 @@ const styles = StyleSheet.create({
   sheetLabel: { ...font.label, color: colors.textFaint, textTransform: "uppercase", marginBottom: spacing(2) },
   cancel: { alignItems: "center", paddingVertical: spacing(3), marginTop: spacing(1) },
   cancelText: { ...font.body, color: colors.textFaint, fontWeight: "700" },
+  createErr: { ...font.bodySm, color: colors.down, textAlign: "center", marginTop: spacing(3), lineHeight: 18 },
 });

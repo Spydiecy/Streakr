@@ -16,10 +16,13 @@ import {
   createReadOnlyExchange,
   createSignerExchange,
   createWalletClientExchange,
+  deployment,
+  NETWORK,
   VENUE_ID,
   LOT_RAW,
   TICK_RAW,
 } from "./chain";
+import { privateKeyToAccount } from "viem/accounts";
 import type { Direction, Symbol_, WindowLength } from "./types";
 import type { CallSigner } from "./walletTypes";
 
@@ -87,11 +90,36 @@ export interface LiveMarketInfo {
   yesAsk?: number;
 }
 
+/**
+ * Map a raw `intervalSec` onto one of Streakr's window labels.
+ *
+ * Snaps to the NEAREST cadence rung rather than requiring an exact match. The
+ * indexer derives a series' interval as `expiry − tradingStart`, and trading
+ * routinely opens a second or two late, so a 1d series is indexed as 86398 or
+ * 86399 as often as 86400 (the SDK documents ±CADENCE_TOLERANCE_SEC on its own
+ * `intervalSec` filter for exactly this reason).
+ *
+ * An exact `===` here was silently returning null for those off-by-a-second
+ * rolls. A null window is dropped by `availableWindows`, which is what made the
+ * 4h/1d chips vanish and reappear at random — the chip set was really tracking
+ * whether the venue happened to have opened that window on the exact second.
+ *
+ * Tolerance scales with the cadence: a second of drift is nothing on a 1d
+ * window but shouldn't merge 15m into 1h, so it's the tighter of 1% or a
+ * quarter of the gap to the neighbouring rung.
+ */
 function labelWindow(intervalSec: number): WindowLength | null {
-  for (const [label, secs] of Object.entries(WINDOW_SECONDS)) {
-    if (secs === intervalSec) return label as WindowLength;
+  if (!Number.isFinite(intervalSec) || intervalSec <= 0) return null;
+
+  let best: { label: WindowLength; secs: number; delta: number } | null = null;
+  for (const [label, secs] of Object.entries(WINDOW_SECONDS) as [WindowLength, number][]) {
+    const delta = Math.abs(secs - intervalSec);
+    if (!best || delta < best.delta) best = { label, secs, delta };
   }
-  return null;
+  if (!best) return null;
+
+  const tolerance = Math.max(10, best.secs * 0.01);
+  return best.delta <= tolerance ? best.label : null;
 }
 
 /**
@@ -167,7 +195,12 @@ export async function listLiveMarkets(asset?: Symbol_): Promise<LiveMarketInfo[]
         // seconds, so a row can read "Trading" after the window has locked.
         if (onchain.status !== 1) return null;
 
-        const intervalSec = Number(row.intervalSec ?? 0);
+        // `expiry − tradingStart` is the authoritative window length; the
+        // indexer's own intervalSec is occasionally absent on freshly-rolled
+        // rows, and 0 would label as null and hide the market entirely.
+        const indexed = Number(row.intervalSec ?? 0);
+        const derived = Number(onchain.expiry) - Number(row.tradingStart ?? 0);
+        const intervalSec = indexed > 0 ? indexed : derived > 0 ? derived : 0;
         const decimals = onchain.decimals;
         const one = 10 ** decimals;
 
@@ -184,12 +217,17 @@ export async function listLiveMarkets(asset?: Symbol_): Promise<LiveMarketInfo[]
           // No resting liquidity yet — leave undefined; the UI shows "—".
         }
 
+        const window = labelWindow(intervalSec);
+
         return {
           marketId,
           onchain,
           symbol: row.asset as Symbol_,
-          label: `${row.asset} ${row.interval ?? labelWindow(intervalSec) ?? ""}`.trim(),
-          window: labelWindow(intervalSec),
+          // Label off OUR window vocabulary, not the indexer's. The SDK snaps
+          // 86400s to "24h" while Streakr's chip for the same series reads
+          // "1d", and showing both at once looks like a mismatched market.
+          label: `${row.asset} ${window ?? row.interval ?? ""}`.trim(),
+          window,
           intervalSec,
           secondsLeft: Number(onchain.expiry) - Math.floor(Date.now() / 1000),
           yesBid,
@@ -223,6 +261,52 @@ export interface PlaceCallResult {
   filledShares: number;
   fillPrice: number;
   stakeSpent: number;
+}
+
+export interface CollateralBalance {
+  raw: bigint;
+  human: number;
+  decimals: number;
+}
+
+/**
+ * tUSDC balance for an address, read straight off the collateral ERC-20.
+ *
+ * Used to preflight a call. Without this the first sign of a funding problem is
+ * `ERC20InsufficientBalance` arriving as a revert *after* the user has approved
+ * a signature, which reads as the app being broken rather than the wallet being
+ * empty — and on an external wallet it costs them gas to find out.
+ */
+export async function getCollateralBalance(address: `0x${string}`): Promise<CollateralBalance> {
+  const exchange = createReadOnlyExchange();
+  const d = deployment();
+  const token = (d.addresses.collateral ?? d.addresses.testUsdc) as `0x${string}`;
+  const raw = await withTimeout(
+    exchange.client.getErc20Balance(token, address),
+    15_000,
+    "Reading tUSDC balance",
+  );
+  return { raw, human: Number(raw) / 10 ** d.decimals, decimals: d.decimals };
+}
+
+/**
+ * Mint test collateral to the signer via the collateral token's public
+ * `faucet()` (testnet only).
+ *
+ * This is the same call `chain-integration/scripts/fund-collateral.ts` makes.
+ * Exposed in the app so an empty wallet is a one-tap fix instead of a dead end
+ * — it works for an external wallet too, provided it has STT for gas.
+ */
+export async function mintTestCollateral(signer: CallSigner): Promise<string> {
+  if (NETWORK !== "testnet") {
+    throw new Error("The tUSDC faucet only exists on testnet.");
+  }
+  const exchange: SomniaMarkets =
+    signer.kind === "embedded"
+      ? createSignerExchange(signer.privateKey)
+      : createWalletClientExchange(signer.walletClient);
+  const res = await exchange.trader.faucet();
+  return res.hash ?? "";
 }
 
 function toSteps(human: number, decimals: number, step: bigint, mode: "round" | "floor"): bigint {
@@ -291,6 +375,27 @@ export async function placeCall(
   const nowSec = Math.floor(Date.now() / 1000);
   const expiresAt = Math.min(nowSec + 60, Number(info.onchain.expiry));
   if (expiresAt <= nowSec) throw new Error("window closes too soon to place this call");
+
+  // Check collateral BEFORE requesting a signature. A buy escrows
+  // price x quantity of collateral straight from the wallet, so an underfunded
+  // wallet reverts with ERC20InsufficientBalance — but only after the user has
+  // approved the transaction and paid gas to discover it. Same reasoning as
+  // chain-integration/packages/ec-core/src/orders.ts, which preflights the
+  // identical condition for the bots.
+  const me = (signer.kind === "embedded"
+    ? privateKeyToAccount(signer.privateKey).address
+    : signer.walletClient.account?.address) as `0x${string}` | undefined;
+  if (me) {
+    const need = (priceOwn * quantity) / one;
+    const held = await exchange.client
+      .getErc20Balance(info.onchain.collateral, me)
+      .catch(() => null);
+    if (held !== null && held < need) {
+      // Shaped so friendlyError() classifies it identically to the on-chain
+      // revert — one message path whether it's caught here or by the contract.
+      throw new Error(`ERC20InsufficientBalance(${me}, ${held}, ${need})`);
+    }
+  }
 
   const res = await exchange.trader.placeOrder({
     pool: info.onchain.pool,

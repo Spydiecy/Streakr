@@ -35,6 +35,7 @@
   "devDependencies": {
     "@types/react": "~19.2.2",
     "babel-preset-expo": "~57.0.0",
+    "tsx": "4.20.6",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -43,6 +44,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
+    "test": "tsx src/lib/__tests__/errors.test.ts",
     "clean": "rm -rf dist .expo node_modules/.cache",
     "build:web": "npm run clean && expo export --platform web --clear && node scripts/relocate-vendor-assets.mjs dist",
     "postbuild:web": "node scripts/verify-web-build.mjs dist"

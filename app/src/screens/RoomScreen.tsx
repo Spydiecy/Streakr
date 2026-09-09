@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView, Alert } from "react-native";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import Animated, {
@@ -10,6 +10,7 @@ import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
 import { subscribeRoom, subscribeLeaderboard, setRoomActiveMarket } from "../lib/firestoreApi";
 import { listLiveMarkets, availableWindows, type LiveMarketInfo } from "../lib/eventContracts";
+import { friendlyErrorLine } from "../lib/errors";
 import { fetchSentiment } from "../lib/sentimentApi";
 import type { LeaderboardEntryDoc, RoomDoc, Symbol_, WindowLength } from "../lib/types";
 import { Countdown } from "../components/Countdown";
@@ -39,43 +40,72 @@ export default function RoomScreen({ route, navigation }: Props) {
   const [symbol, setSymbol] = useState<Symbol_>("BTC");
   const [win, setWin] = useState<WindowLength>("1h");
   const [allMarkets, setAllMarkets] = useState<LiveMarketInfo[]>([]);
-  const [market, setMarket] = useState<LiveMarketInfo | null>(null);
+  // Raw last-written market; read through the `market` guard below rather than
+  // directly, so a response for a since-changed symbol/window can't render.
+  const [rawMarket, setMarket] = useState<LiveMarketInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  // Which asset the last completed read was for. "No live windows" is only
+  // truthful once a read for the *current* asset has actually finished;
+  // without this the empty state flashes for a frame on every toggle.
+  const [loadedFor, setLoadedFor] = useState<Symbol_ | null>(null);
   const [sentiment, setSentiment] = useState<{ text: string; source: string } | null>(null);
   const [stake, setStake] = useState(5);
 
   useEffect(() => subscribeRoom(roomId, setRoom), [roomId]);
   useEffect(() => subscribeLeaderboard(roomId, setBoard), [roomId]);
 
+  /**
+   * Guards against out-of-order market reads.
+   *
+   * `listLiveMarkets` takes seconds, and both the symbol/window toggles and a
+   * 15s poll can start one. Switching BTC→ETH while a BTC read is in flight let
+   * the older response land last and overwrite state — the card then showed the
+   * ETH heading (from `symbol`) above BTC's label and BTC's prices, which is
+   * exactly the "odds don't change when I switch" symptom. Only the newest
+   * request is allowed to write.
+   */
+  const reqIdRef = useRef(0);
+
   const loadMarket = useCallback(async () => {
+    const reqId = ++reqIdRef.current;
+    const isStale = () => reqId !== reqIdRef.current;
+
     setLoading(true);
     setErr(null);
     try {
       const live = await listLiveMarkets(symbol);
-      setAllMarkets(live);
+      if (isStale()) return;
 
-      // The venue rotates which cadences it runs, so the selected window may
-      // simply not exist right now. Fall back to one that does — and resolve
-      // the market in this same pass rather than returning early and waiting
-      // for a re-run, which would leave the card in a "no windows" state that
-      // contradicts the toggle showing live options.
-      const options = availableWindows(live, symbol);
+      // Keep the last non-empty result for a symbol. A transient empty read
+      // (RPC hiccup, or every market mid-roll and failing the status gate)
+      // would otherwise blank `windowOptions` and make the 4h/1d chips vanish
+      // for a poll cycle.
+      if (live.length > 0) setAllMarkets(live);
+
+      const source = live.length > 0 ? live : [];
+      const options = availableWindows(source, symbol);
       const effective = options.includes(win) ? win : options[0];
       if (effective && effective !== win) setWin(effective);
 
-      const found = effective ? (live.find((m) => m.window === effective) ?? null) : null;
+      const found = effective ? (source.find((m) => m.window === effective) ?? null) : null;
+      if (isStale()) return;
       setMarket(found);
+
+      setLoadedFor(symbol);
+
       if (found && session && effective) {
         await setRoomActiveMarket(roomId, {
-          symbol, window: effective,
+          symbol,
+          window: effective,
           positionMarketId: found.marketId,
         }).catch(() => {});
       }
     } catch (e) {
-      setErr((e as Error).message);
+      if (isStale()) return;
+      setErr(friendlyErrorLine(e));
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, [symbol, win, roomId, session]);
 
@@ -93,14 +123,24 @@ export default function RoomScreen({ route, navigation }: Props) {
     return () => { dead = true; };
   }, [symbol]);
 
+  // Never render a market that belongs to a different asset or window than the
+  // toggles currently show. Belt to the request-id braces: even if a response
+  // slips through, the card can't display BTC's prices under an ETH heading —
+  // the mismatch resolves to "still loading" instead of to wrong numbers.
+  const market =
+    rawMarket && rawMarket.symbol === symbol && rawMarket.window === win ? rawMarket : null;
+
   const windowOptions = availableWindows(allMarkets, symbol).map((w) => ({ value: w, label: w }));
   const closed = !market || market.secondsLeft <= 0;
   const totalSec = market?.intervalSec && market.intervalSec > 0 ? market.intervalSec : 3600;
 
   const call = (direction: "up" | "down") => {
     if (!market || closed) {
+      // Unreachable in practice — both buttons are disabled while closed, and
+      // the note under them explains why. No Alert here: react-native-web's
+      // Alert is a stub, so on the primary demo surface it would be a silent
+      // no-op rather than a message.
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      Alert.alert("Window closed", "This window just locked. Pick another symbol or window.");
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -131,7 +171,7 @@ export default function RoomScreen({ route, navigation }: Props) {
         <Animated.View entering={FadeIn.duration(280)}>
           <Card padded={20} elevated style={styles.market}>
             <LinearGradient colors={["rgba(197,248,42,0.07)", "transparent"]} style={StyleSheet.absoluteFill} />
-            {loading && !market ? (
+            {!market && (loading || loadedFor !== symbol) && !err ? (
               <View style={styles.loadingWrap}>
                 <ActivityIndicator color={colors.accent} />
                 <Text style={styles.loadingText}>Reading live {symbol} markets on-chain…</Text>
@@ -159,7 +199,8 @@ export default function RoomScreen({ route, navigation }: Props) {
             ) : (
               <View style={styles.marketRow}>
                 <View style={{ flex: 1 }}>
-                  <Chip label={closed ? "Locked" : "Live"} tone={closed ? "neutral" : "up"} icon="live" />
+                  {/* Stretch column: without align="start" the pill spans the full width. */}
+                  <Chip label={closed ? "Locked" : "Live"} tone={closed ? "neutral" : "up"} icon="live" align="start" />
                   <Text style={styles.marketSym}>{symbol}</Text>
                   <Text style={styles.marketId} numberOfLines={1}>{market.label}</Text>
                   <View style={styles.book}>

@@ -11,13 +11,11 @@
 import "react-native-get-random-values"; // must be imported before viem/wallet code on RN
 import { SomniaMarkets, SOMNIA_TESTNET_PRICE_FEED } from "@somnia-chain/markets-sdk";
 import { defineChain, type Chain } from "viem";
+import { NETWORK, COLLATERAL_DECIMALS, type Network } from "./networkConfig";
 
-export type Network = "testnet" | "mainnet";
-
-// Hardcode testnet for the hackathon demo — flip via EXPO_PUBLIC_NETWORK if
-// mainnet support is ever wired up (it needs its own price-feed endpoint,
-// see docs/event-contracts.md "Known limitation").
-export const NETWORK: Network = (process.env.EXPO_PUBLIC_NETWORK as Network) ?? "testnet";
+// Re-exported so existing importers of `NETWORK` / `Network` from this module
+// keep working; the definitions live in networkConfig.ts, which has no imports.
+export { NETWORK, type Network };
 
 const ENDPOINTS: Record<Network, { rpc: string; ws: string; indexer: string }> = {
   testnet: {
@@ -46,7 +44,7 @@ const CORE = {
 const DEPLOYMENTS: Record<Network, { chainId: number; decimals: number; addresses: Record<string, string> }> = {
   testnet: {
     chainId: 50312,
-    decimals: 6,
+    decimals: COLLATERAL_DECIMALS.testnet,
     addresses: {
       ...CORE,
       collateral: "0x70a86D8842FB63C4Ad2b7cdddF530eBf1BB25d8E",
@@ -56,7 +54,7 @@ const DEPLOYMENTS: Record<Network, { chainId: number; decimals: number; addresse
   },
   mainnet: {
     chainId: 5031,
-    decimals: 18,
+    decimals: COLLATERAL_DECIMALS.mainnet,
     addresses: {
       ...CORE,
       collateral: "0x00000022dA000002656c64D9eA6011ea952D008A",

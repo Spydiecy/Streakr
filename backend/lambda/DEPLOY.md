@@ -16,6 +16,7 @@ different AWS account).
 | `streakr-sentiment` | Function URL (public GET) | `src/handlers/sentiment.ts` |
 | `streakr-render-result-card` | Function URL (public GET) | `src/handlers/renderResultCard.ts` |
 | `streakr-pre-lock-nudge` | Function URL (GET + shared secret) | `src/handlers/preLockNudge.ts` |
+| `streakr-faucet` | Function URL (public POST) | `src/handlers/faucet.ts` |
 
 Region: `us-east-1`. Runtime: `nodejs20.x`. Architecture: `x86_64`.
 
@@ -321,3 +322,144 @@ single flat `index.js` per handler, so each zip is one file with no
 **Cost.** All four functions sit inside Lambda's always-free tier (1M
 requests + 400K GB-seconds/month, permanently). The 1-minute schedule is
 ~43,200 invocations/month, nowhere near the limit.
+
+---
+
+## Deploying `streakr-faucet`
+
+### Why it exists
+
+The demo wallet's private key is generated **in the browser**. Nothing on the
+client can fund it, so a brand-new key holds `0 STT` — and STT is the gas token,
+which means that wallet cannot send *any* transaction. Critically, that includes
+the collateral token's own public `faucet()`, because that is itself a
+transaction. Only something that already holds gas can break the circle, so the
+grant has to come from the server.
+
+Measured with `chain-integration/scripts/check-demo-wallet-funding.ts`:
+
+```
+who                  STT (gas)     tUSDC
+fresh demo wallet    0             0
+project treasury     0.976         9590.6
+```
+
+Before this function existed, every visitor's first call failed regardless of
+wallet path — an external wallet has no Shannon STT either, and there's no way
+to faucet someone else's wallet on their behalf.
+
+### Guards
+
+It spends real (testnet) treasury funds, so:
+
+- **one grant per address, ever** — recorded in `faucetGrants/{address}`
+- **rolling 24h cap** across all addresses (`FAUCET_DAILY_CAP`, default 60)
+- **refuses on mainnet**
+- **refuses when the treasury is nearly empty**, rather than half-funding an
+  address and leaving a confusing broken state
+- the grant record is written **before** any transfer, so a racing duplicate
+  request loses on the create and cannot double-spend
+
+`faucetGrants` is closed to clients in `firestore.rules`: a client that could
+create a record could lock its own address out of funding, and one that could
+delete could re-request indefinitely and drain the treasury.
+
+### Deploy
+
+```bash
+cd backend/lambda
+npm run package
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+aws lambda create-function \
+  --function-name streakr-faucet \
+  --runtime nodejs20.x \
+  --role "arn:aws:iam::${ACCOUNT_ID}:role/streakr-lambda-exec" \
+  --handler index.handler \
+  --zip-file fileb://deploy/faucet.zip \
+  --timeout 120 --memory-size 256
+
+aws lambda wait function-active --function-name streakr-faucet
+```
+
+### Environment
+
+`FAUCET_PRIVATE_KEY` is the treasury key that holds the STT and tUSDC. Treat it
+as a secret — for anything beyond a testnet demo it belongs in Secrets Manager
+rather than a plain Lambda env var.
+
+```bash
+python3 <<'EOF'
+import json
+sa = json.dumps(json.load(open("streakr-hackathon-firebase-adminsdk.json")))
+json.dump({"Variables": {
+    "NETWORK": "testnet",
+    "FIREBASE_SERVICE_ACCOUNT_JSON": sa,
+    "FAUCET_PRIVATE_KEY": "0x<treasury key — same one in chain-integration/.env>",
+    "FAUCET_STT": "0.02",     # ~4 calls' worth of gas per user
+    "FAUCET_USDC": "150",     # covers the $5–$50 stake buttons
+    "FAUCET_DAILY_CAP": "60",
+}}, open("/tmp/env_faucet.json", "w"))
+EOF
+
+aws lambda update-function-configuration --function-name streakr-faucet \
+  --environment file:///tmp/env_faucet.json
+aws lambda wait function-updated --function-name streakr-faucet
+```
+
+### Function URL
+
+Same two-permission gotcha as the other public functions (see the warning
+above — `lambda:InvokeFunctionUrl` alone yields a 403 that looks like a
+propagation delay):
+
+```bash
+aws lambda create-function-url-config \
+  --function-name streakr-faucet \
+  --auth-type NONE \
+  --cors '{"AllowOrigins":["*"],"AllowMethods":["POST"],"AllowHeaders":["content-type"]}'
+
+aws lambda add-permission --function-name streakr-faucet \
+  --statement-id UrlPolicyInvokeURL \
+  --action lambda:InvokeFunctionUrl --principal "*" --function-url-auth-type NONE
+
+aws lambda add-permission --function-name streakr-faucet \
+  --statement-id UrlPolicyInvokeFunction \
+  --action lambda:InvokeFunction --principal "*" --invoked-via-function-url
+```
+
+Put the resulting URL in `app/.env` as `EXPO_PUBLIC_FAUCET_URL`, then rebuild
+the web app — `npm run build:web` asserts the value is actually inlined, since
+Metro caches env inlining and a plain `expo export` would ship the old bundle.
+
+### Verify
+
+```bash
+# A fresh address should get funded once...
+ADDR=0x$(openssl rand -hex 20)
+curl -sS -X POST "https://<faucet-url>/" \
+  -H 'content-type: application/json' -d "{\"address\":\"$ADDR\"}"
+# -> {"funded":true,"stt":"0.02","usdc":"150.0","sttHash":"0x…","usdcHash":"0x…"}
+
+# ...and be refused the second time.
+curl -sS -X POST "https://<faucet-url>/" \
+  -H 'content-type: application/json' -d "{\"address\":\"$ADDR\"}"
+# -> {"alreadyFunded":true,"message":"This address has already been funded."}
+
+# Bad input is rejected without spending anything.
+curl -sS -X POST "https://<faucet-url>/" \
+  -H 'content-type: application/json' -d '{"address":"nope"}'
+# -> {"error":"provide a valid EVM address as {\"address\":\"0x…\"}"}
+```
+
+### Topping the treasury back up
+
+```bash
+cd chain-integration
+npx tsx scripts/fund-collateral.ts        # mints 10,000 tUSDC to the treasury
+# Gas has no self-serve faucet — use the Shannon faucet for STT.
+```
+
+At the defaults above, `0.976 STT` funds roughly 48 wallets and `9590 tUSDC`
+roughly 63, so gas is the binding constraint. Watch it before a demo.

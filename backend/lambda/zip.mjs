@@ -6,7 +6,7 @@ import { execSync } from "node:child_process";
 import { mkdirSync, existsSync, rmSync } from "node:fs";
 import path from "node:path";
 
-const handlers = ["pollPendingCalls", "preLockNudge", "sentiment", "renderResultCard"];
+const handlers = ["pollPendingCalls", "preLockNudge", "sentiment", "renderResultCard", "faucet"];
 
 mkdirSync("deploy", { recursive: true });
 

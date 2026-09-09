@@ -12,6 +12,7 @@
 
 import React, { createContext, useContext, useMemo, useState, useCallback } from "react";
 import { loadOrCreateWallet, deleteWallet } from "./wallet";
+import { requestFaucet, HAS_FAUCET } from "./faucetApi";
 import type { CallSigner, WalletState } from "./walletTypes";
 
 const WalletCtx = createContext<WalletState | null>(null);
@@ -23,7 +24,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const useEmbedded = useCallback(async () => {
     setBusy(true);
     try {
-      setEmbedded(await loadOrCreateWallet());
+      const w = await loadOrCreateWallet();
+      setEmbedded(w);
+      // See the web provider for the full reasoning: a freshly generated key has
+      // 0 STT, STT is gas, so the wallet can't even send the collateral faucet's
+      // transaction. The grant has to come from the server. Fired without
+      // awaiting — the Call screen re-checks and can retry explicitly.
+      if (HAS_FAUCET) {
+        requestFaucet(w.address).catch((e) => {
+          console.warn("[wallet] initial funding failed, user can retry from the call screen:", e);
+        });
+      }
     } finally {
       setBusy(false);
     }

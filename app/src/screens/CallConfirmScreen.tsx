@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import React, { useEffect, useState, useCallback } from "react";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInUp, FadeIn } from "react-native-reanimated";
@@ -7,8 +7,16 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useSession } from "../lib/SessionContext";
 import { useWallet } from "../lib/WalletProvider";
-import { findMarket, placeCall, type LiveMarketInfo } from "../lib/eventContracts";
+import {
+  findMarket,
+  placeCall,
+  getCollateralBalance,
+  mintTestCollateral,
+  type LiveMarketInfo,
+} from "../lib/eventContracts";
 import { recordCall } from "../lib/firestoreApi";
+import { friendlyError, type FriendlyError } from "../lib/errors";
+import { requestFaucet, HAS_FAUCET } from "../lib/faucetApi";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
@@ -25,7 +33,10 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
   const [market, setMarket] = useState<LiveMarketInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<FriendlyError | null>(null);
+  /** tUSDC on hand; null until read. Drives the pre-sign funding warning. */
+  const [balance, setBalance] = useState<number | null>(null);
+  const [minting, setMinting] = useState(false);
 
   const isUp = direction === "up";
   const grad = isUp ? colors.gradAccent : colors.gradDown;
@@ -35,9 +46,60 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
   useEffect(() => {
     findMarket(symbol, win)
       .then(setMarket)
-      .catch((e) => setErr((e as Error).message))
+      .catch((e) => setErr(friendlyError(e)))
       .finally(() => setLoading(false));
   }, [symbol, win]);
+
+  // Read the wallet's collateral up front. Finding out about an empty wallet
+  // from an ERC20InsufficientBalance revert means the user already approved a
+  // signature and (on an external wallet) paid gas to learn it.
+  const refreshBalance = useCallback(() => {
+    if (!wallet.address) return;
+    getCollateralBalance(wallet.address)
+      .then((b) => setBalance(b.human))
+      .catch(() => setBalance(null));
+  }, [wallet.address]);
+
+  useEffect(refreshBalance, [refreshBalance]);
+
+  const underfunded = balance !== null && balance < stakeUsdso;
+
+  /**
+   * Get the wallet ready to trade.
+   *
+   * Order matters. The server faucet goes first because it needs nothing from
+   * the wallet — an unfunded wallet has no STT, and STT is gas, so it cannot
+   * send the collateral token's own `faucet()` transaction either. Only once gas
+   * has landed is the on-chain mint usable, which is the fallback for an address
+   * that already used its one server grant but has since spent the collateral.
+   */
+  const topUp = async () => {
+    if (!wallet.address) return;
+    setMinting(true);
+    setErr(null);
+    try {
+      let granted = false;
+      if (HAS_FAUCET) {
+        const r = await requestFaucet(wallet.address);
+        granted = r.funded;
+      }
+
+      if (!granted) {
+        // Already used its grant (or no faucet configured) — fall back to the
+        // public on-chain faucet, which works now that the wallet holds gas.
+        const signer = await wallet.getSigner();
+        await mintTestCollateral(signer);
+      }
+
+      // Give the transfers a moment to land before re-reading.
+      await new Promise((r) => setTimeout(r, 4000));
+      refreshBalance();
+    } catch (e) {
+      setErr(friendlyError(e));
+    } finally {
+      setMinting(false);
+    }
+  };
 
   // Price of the leg being bought, in its own probability terms.
   const entry = market
@@ -67,10 +129,12 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       navigation.replace("Result", { callId, roomId });
     } catch (e) {
-      const m = (e as Error).message;
-      setErr(m);
+      const f = friendlyError(e);
+      setErr(f);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Call failed", m);
+      // The inline block below already says this; a native Alert on top of it
+      // is redundant on mobile and a no-op on react-native-web anyway.
+      if (f.kind === "insufficient-collateral") refreshBalance();
     } finally {
       setBusy(false);
     }
@@ -122,17 +186,44 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
           {loading ? (
             <ActivityIndicator color={colors.accent} />
           ) : !market ? (
-            <Text style={styles.err}>
-              {err ?? `No live ${symbol} ${win} window right now — go back and pick another.`}
-            </Text>
+            <ErrorNote
+              title={err?.title ?? "No live window"}
+              detail={
+                err?.detail ?? `The venue isn't quoting a ${symbol} ${win} window right now — go back and pick another.`
+              }
+            />
           ) : (
             <>
-              {err ? <Text style={styles.err}>{err}</Text> : null}
+              {err ? <ErrorNote title={err.title} detail={err.detail} /> : null}
+
+              {/* Funding gate. Shown before signing rather than after failing. */}
+              {underfunded && !err ? (
+                <ErrorNote
+                  title="Not enough tUSDC"
+                  detail={`This wallet holds ${balance?.toFixed(2)} tUSDC and the call needs ${stakeUsdso.toFixed(2)}.`}
+                />
+              ) : null}
+
+              {underfunded ||
+              err?.kind === "insufficient-collateral" ||
+              err?.kind === "insufficient-gas" ? (
+                <PillButton
+                  label={minting ? "Funding wallet…" : "Fund this wallet"}
+                  icon="add"
+                  tone="paper"
+                  onPress={topUp}
+                  loading={minting}
+                  size="md"
+                  full
+                />
+              ) : null}
+
               <PillButton
                 label="Sign & Submit Call"
                 icon="wallet"
                 onPress={confirm}
                 loading={busy}
+                disabled={underfunded || minting}
                 size="lg"
                 full
                 tone={isUp ? "accent" : "down"}
@@ -145,6 +236,23 @@ export default function CallConfirmScreen({ route, navigation }: Props) {
         </View>
       </View>
     </Screen>
+  );
+}
+
+/**
+ * A failure the user can read. Headline plus one actionable sentence, on a
+ * tinted panel so it registers as a state of the screen rather than as a stray
+ * line of red text under the button.
+ */
+function ErrorNote({ title, detail }: { title: string; detail: string }) {
+  return (
+    <View style={styles.note}>
+      <Icon name="close" size={14} color={colors.down} style={{ marginTop: 2 }} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.noteTitle}>{title}</Text>
+        <Text style={styles.noteBody}>{detail}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -192,7 +300,14 @@ const styles = StyleSheet.create({
   signedByV: { ...font.bodySm, fontSize: 12, color: colors.paperInk, fontWeight: "700" },
 
   footer: { gap: spacing(3) },
-  err: { color: colors.down, fontSize: 12.5, textAlign: "center", lineHeight: 18 },
+  note: {
+    flexDirection: "row", gap: spacing(2.5), alignItems: "flex-start",
+    backgroundColor: colors.downWash, borderRadius: radius.md,
+    borderWidth: 1, borderColor: "rgba(255,90,64,0.28)",
+    padding: spacing(3.5),
+  },
+  noteTitle: { ...font.body, fontSize: 13.5, fontWeight: "800", color: colors.down },
+  noteBody: { ...font.bodySm, fontSize: 12.5, color: colors.textMuted, marginTop: 2, lineHeight: 17.5 },
   cancel: { alignItems: "center", paddingVertical: spacing(2) },
   cancelT: { ...font.body, color: colors.textFaint, fontWeight: "700" },
 });

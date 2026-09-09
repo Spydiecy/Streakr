@@ -100,11 +100,12 @@ export default function OnboardingScreen({ navigation }: Props) {
                     <View style={styles.rule} />
                   </View>
                   <Pressable onPress={handleDemo} style={styles.demoBtn}>
-                    <Text style={styles.demoText}>Use the pre-funded demo wallet</Text>
+                    <Text style={styles.demoText}>Use the demo wallet</Text>
                   </Pressable>
                   <Text style={styles.demoHint}>
-                    An external wallet won't hold Somnia testnet STT or tUSDC, so the demo wallet is the
-                    fastest way to run a full call cycle.
+                    Creates a throwaway testnet wallet and funds it with gas and tUSDC so you can place a
+                    real call straight away. An external wallet won't hold Somnia testnet STT or tUSDC
+                    yet, so this is the fastest route.
                   </Text>
                 </>
               ) : (

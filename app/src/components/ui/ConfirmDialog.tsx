@@ -10,6 +10,8 @@ interface Props {
   body?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** Hold the action while the dialog is still loading what it needs to say. */
+  confirmDisabled?: boolean;
   destructive?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -32,6 +34,7 @@ export function ConfirmDialog({
   body,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  confirmDisabled,
   destructive,
   onConfirm,
   onCancel,
@@ -49,6 +52,7 @@ export function ConfirmDialog({
             tone={destructive ? "down" : "accent"}
             size="md"
             full
+            disabled={confirmDisabled}
             style={{ marginTop: spacing(5) }}
           />
           <Pressable onPress={onCancel} style={styles.cancel}>
