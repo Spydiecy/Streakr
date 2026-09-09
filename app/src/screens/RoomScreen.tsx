@@ -397,11 +397,16 @@ export default function RoomScreen({ route, navigation }: Props) {
                     </View>
                   </View>
 
+                  {/* Says what the user can act on, not what's missing. The
+                      earlier copy called this a "thin book", which is the wrong
+                      term — both sides are quoted, they're just priced far apart —
+                      and it explained the absence of a percentage the card no
+                      longer shows. Payouts are always exact, so lead with that. */}
                   {!quality.chanceIsMeaningful ? (
                     <Text style={styles.thin}>
                       {quality.twoSided
-                        ? "Thin book — the two sides don't line up, so these prices aren't a reliable read on likelihood."
-                        : "Only one side is quoted right now, so the price reflects a single resting order rather than a market view."}
+                        ? "Wide spread — these prices aren't a read on the odds. Payouts are exact."
+                        : "Only one side is quoted, so this price is a single order rather than a market view."}
                     </Text>
                   ) : null}
                 </View>

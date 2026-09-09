@@ -189,7 +189,7 @@ export function CallSheet({ visible, market, direction, stake, onCancel, onPlace
           {!quality.chanceIsMeaningful && quote ? (
             <Text style={styles.thin}>
               {quality.twoSided
-                ? "Thin book — the two sides don't line up, so treat this price as one order rather than a market view."
+                ? "Wide spread — the two prices don't add up, so treat this one as a single order rather than a market view."
                 : "Only this side is quoted right now, so the price is a single resting order rather than a market view."}
             </Text>
           ) : null}
