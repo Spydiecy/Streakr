@@ -11,6 +11,7 @@ import type { RootStackParamList } from "../navigation/types";
 import { subscribeCall } from "../lib/firestoreApi";
 import type { CallDoc } from "../lib/types";
 import { explorerTxUrl } from "../lib/chain";
+import { openExternal } from "../lib/telegramMiniApp";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
@@ -134,7 +135,19 @@ export default function ResultScreen({ route, navigation }: Props) {
               </Animated.View>
             )}
 
-            <Pressable onPress={() => Linking.openURL(explorerTxUrl(call.txHash))} style={styles.txWrap}>
+            {/* Telegram's WebView blocks the popup a plain openURL turns into, so
+                inside a Mini App this link — the one that proves the call was
+                real — silently did nothing. openExternal hands it to Telegram and
+                reports whether it took it, so the browser path is unchanged. */}
+            <Pressable
+              onPress={() => {
+                const url = explorerTxUrl(call.txHash);
+                if (!openExternal(url)) Linking.openURL(url);
+              }}
+              accessibilityRole="link"
+              accessibilityLabel="View on-chain transaction"
+              style={styles.txWrap}
+            >
               <Text style={styles.tx}>View on-chain transaction ↗</Text>
             </Pressable>
           </>

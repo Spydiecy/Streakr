@@ -6,6 +6,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { useWallet } from "../lib/WalletProvider";
 import { useSession } from "../lib/SessionContext";
+import { isTelegramMiniApp } from "../lib/telegramMiniApp";
 import { colors, radius, font, spacing } from "../theme";
 import { Screen } from "../components/ui/Screen";
 import { Card } from "../components/ui/Card";
@@ -26,6 +27,9 @@ export default function OnboardingScreen({ navigation }: Props) {
   const wallet = useWallet();
   const { session, error, setDisplayName } = useSession();
   const [name, setName] = useState("");
+  // Read once: the host can't change during a session, and calling it in render
+  // keeps it out of the module's import-time work.
+  const [inTelegram] = useState(() => isTelegramMiniApp());
 
   // Once a wallet is connected AND the Firebase session is attached, go in.
   useEffect(() => {
@@ -82,6 +86,32 @@ export default function OnboardingScreen({ navigation }: Props) {
                 autoCorrect={false}
               />
 
+              {/* Inside Telegram the order is reversed, because there is no
+                  browser extension in that WebView — an injected connector can
+                  never succeed there, so leading with "Connect Wallet" is a
+                  guaranteed dead end. The demo wallet is a browser-generated key
+                  funded by the server faucet, which works identically in a
+                  WebView, so it becomes the primary action and the external
+                  option is dropped rather than left to fail. */}
+              {inTelegram ? (
+                <>
+                  <PillButton
+                    label="Create Demo Wallet"
+                    icon="wallet"
+                    onPress={handleDemo}
+                    loading={wallet.connecting}
+                    size="lg"
+                    full
+                    style={{ marginTop: spacing(3) }}
+                  />
+                  <Text style={styles.demoHint}>
+                    Creates a throwaway testnet wallet and funds it with gas and tUSDC, so you can place
+                    a real on-chain call without leaving Telegram. Browser wallet extensions aren't
+                    available inside Telegram — open Streakr in a browser if you'd rather connect your
+                    own.
+                  </Text>
+                </>
+              ) : (
               <PillButton
                 label={wallet.supportsExternal ? "Connect Wallet" : "Create Device Wallet"}
                 icon="wallet"
@@ -91,8 +121,10 @@ export default function OnboardingScreen({ navigation }: Props) {
                 full
                 style={{ marginTop: spacing(3) }}
               />
+              )}
 
-              {wallet.supportsExternal ? (
+              {/* Telegram already rendered its own single-option hint above. */}
+              {inTelegram ? null : wallet.supportsExternal ? (
                 <>
                   <View style={styles.orRow}>
                     <View style={styles.rule} />

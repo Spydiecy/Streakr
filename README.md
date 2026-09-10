@@ -64,11 +64,51 @@ Streakr wraps that primitive in a social layer:
 | 📜 **Lists that stay put** | Room calls, room leaderboard and call history each stop growing and scroll inside themselves, so a busy room can't push the sections below it off the page. Capped by `maxHeight`, so a two-call room still renders two rows |
 | 🤖 **Momentum read** | One plain sentence phrased by Mistral `ministral-8b` from real recent window outcomes, labelled "AI take, not advice". The signal is the substance; the model only does wording, and falls back to a deterministic template on any failure so a third party can't break the room card |
 | 🚰 **Zero-setup onboarding** | A new wallet is granted testnet gas + collateral server-side, so a visitor can place a real call in under a minute |
+| 📲 **Telegram Mini App** | The **same deployed URL** also runs inside Telegram, so a result posted in the group is one tap from placing the next call. The app detects the WebView and leads with the funded demo wallet, because no browser extension can exist there |
 
 ## Architecture
 
 Three independent deployables, one shared source of truth (Firestore), and
 one source of real money movement (the Somnia chain itself):
+
+```text
+┌───────────────────────────────────────────────────────────────────────────┐
+│  CLIENT — one Expo build, three surfaces                                  │
+│  web · native · Telegram Mini App (the same deployed URL)                 │
+│                                                                           │
+│  React Native UI  ⇄  Wallet layer (RainbowKit/wagmi · demo wallet)        │
+└──────┬────────────────────────┬───────────────────────────┬───────────────┘
+       │ read markets, books,   │ sign a call               │ anonymous auth
+       │ balances, price feed   │ redeem a won position     │ read/write docs
+       ▼                        ▼                           ▼
+┌──────────────────────────────────────────┐   ┌──────────────────────────────┐
+│  SOMNIA SHANNON TESTNET                  │   │  FIREBASE  (Spark/free)      │
+│                                          │   │                              │
+│  @somnia-chain/markets-sdk               │   │  Anonymous Auth              │
+│                ⇅                         │   │  Firestore                   │
+│  DreamDEX Event Contracts                │   │    users · rooms · calls     │
+│  (binary Up/Down markets)                │   │    leaderboard · resultCards │
+└──────────────────────────────────────────┘   └──────────────┬───────────────┘
+                    ▲                                         ▲
+                    │ read on-chain settlement                │ write status,
+                    │ status (never the indexer)               │ streak, XP,
+                    │                                          │ badges, boards
+┌───────────────────┴──────────────────────────────────────────┴────────────┐
+│  AWS LAMBDA — 6 functions  (not Cloud Functions: Firestore is free on     │
+│                             Spark, Cloud Functions needs paid Blaze)      │
+│                                                                           │
+│  poll-pending-calls   ◄── EventBridge, rate(1 minute)                     │
+│  faucet · sentiment · render-result-card · pre-lock-nudge                 │
+│  telegram-webhook     ◄── /link CODE binds a group chat to a room         │
+└──────┬─────────────────────────────────┬──────────────────────────────────┘
+       │ phrase the momentum signal      │ post the outcome
+       ▼                                 ▼
+  Mistral ministral-8b            Telegram group chat
+                                  (per room, via /link)
+```
+
+<details>
+<summary>Same diagram as Mermaid</summary>
 
 ```mermaid
 flowchart TB
@@ -140,6 +180,8 @@ flowchart TB
     style N8N fill:#171c26,stroke:#ff5470,color:#f8fafc
 ```
 
+</details>
+
 Solid edges are live. The one dotted edge is the poller → n8n webhook, which needs
 n8n reachable at a public URL; the poller posts to Telegram directly regardless,
 so notifications don't depend on it. See
@@ -157,6 +199,50 @@ walkthrough.
 ## Call lifecycle
 
 What actually happens between a tap and a settled streak:
+
+```text
+ 1  USER       taps BTC ▲ UP, stake 5 tUSDC
+ 2  APP        sheet opens OVER the room — payout, loss, capped-risk line,
+               so the countdown and the book stay visible while deciding
+ 3  USER       Sign & place call
+ 4  WALLET     signs an IOC order              ──►  EVENT CONTRACT   (real tx)
+ 5  CHAIN      returns txHash + positionId (the marketId)
+ 6  APP        writes calls/{id}, status=pending  ──►  FIRESTORE
+ 7  APP        Result screen opens, live listener attached
+
+    ┌─────────────────────── every 60 s, EventBridge ────────────────────────┐
+ 8  │ POLLER   getMarketOnchain(positionId)     ──►  EVENT CONTRACT           │
+ 9  │ CHAIN    Trading → Locked → Resolved | Voided                           │
+    └────────────────────────────────────────────────────────────────────────┘
+                                   │
+                   window closes, market resolves on-chain
+                                   ▼
+10  POLLER     reads winningOutcome from the resolved market
+               (Streakr never decides who won)
+11  POLLER     ONE Firestore transaction:
+                 · call status  won | lost | void
+                 · user streak, XP, badges
+                 · room + global leaderboard
+12  POLLER     writes resultCards/{id}          (shareable SVG)
+13  POLLER     posts the outcome to the room's Telegram chat, with the tx link
+14  FIRESTORE  live listener fires  ──►  Result screen updates itself
+15  USER       sees WON · streak +1 · +20 XP
+
+    ══════════════ the payout is RECORDED here, not yet PAID ══════════════
+      A resolved Event Contract does not pay out on its own. The winning
+      position does not decay into collateral — it sits in the wallet as
+      outcome tokens. The feed can say "won 14.58" while the balance has
+      not moved. Redemption is what moves money, and it needs the user's
+      key, so the poller structurally cannot do it.
+
+16  USER       taps Claim on the won call        (Profile → Call history)
+17  WALLET     signs redeem(winning leg balance) ──►  EVENT CONTRACT
+18  CHAIN      burns the outcome tokens, transfers the collateral
+19  WALLET     balance finally moves
+```
+
+<details>
+<summary>Same diagram as Mermaid</summary>
 
 ```mermaid
 sequenceDiagram
@@ -201,6 +287,8 @@ sequenceDiagram
     EC-->>W: collateral transferred — balance finally moves
 ```
 
+</details>
+
 The key property: **Streakr never decides who won.** `judgeCall()` only
 reads `onchain.winningOutcome` from the real settled market — the same
 authoritative status every other DreamDEX client reads, never the lagging
@@ -216,6 +304,49 @@ four lines of the diagram rather than something the poller can do — see
 [the claim decision](#key-design-decisions).
 
 ## Data model
+
+```text
+  users                      rooms                      calls
+  ─────────────────────      ─────────────────────      ────────────────────────
+  uid                 PK     roomId              PK     callId              PK
+  walletAddress              name                       roomId              FK
+  displayName                isPublic                   uid                 FK
+  xp                         memberUids[]               symbol   BTC | ETH
+  currentStreak              createdBy                  direction   up | down
+  bestStreak                 activeMarket{}             window   15m|1h|4h|1d
+  badges[]                                              stakeUsdso
+                                                        txHash
+                                                        positionId
+                                                        status
+                                                          pending|won|lost|void
+                                                        payout
+
+  leaderboard/{scope}/entries          resultCards
+  ─────────────────────────────        ─────────────────────
+  uid                       PK         cardId            PK
+  displayName                          callId            FK
+  currentStreak
+  xp
+
+  RELATIONSHIPS
+    users        1 ──< many  calls          a user makes calls
+    rooms        1 ──< many  calls          a room holds calls
+    users        1 ──< many  entries        a user ranks in leaderboards
+    rooms        1 ──< many  entries        a room has its own board
+    calls        1 ──  1     resultCards    a settled call generates a card
+
+  WHO MAY WRITE WHAT  (backend/firestore.rules)
+    client  ─ may CREATE its own call, status "pending" only, and only with a
+              real txHash + positionId already attached
+    client  ─ may NEVER write status, payout, streak, xp, badges or any
+              leaderboard entry
+    Lambda  ─ writes all of the above via the Admin SDK, which bypasses rules
+              entirely. Outcomes come from the chain, not from a client
+              claiming a win — that is the whole point of the product.
+```
+
+<details>
+<summary>Same diagram as Mermaid</summary>
 
 ```mermaid
 erDiagram
@@ -268,6 +399,8 @@ erDiagram
     leaderboard ||--o{ leaderboard_entries : "ranks"
     calls ||--|| resultCards : "generates"
 ```
+
+</details>
 
 Firestore security rules ([`backend/firestore.rules`](backend/firestore.rules))
 enforce the trust boundary directly: a client can create its **own** call,
@@ -788,6 +921,58 @@ Two notifications exist, and they are **not** delivered the same way:
 | **Settlement** — "X called BTC UP and won 16.67" | a call resolves on-chain | **live**, posted by the poller |
 | **Pre-lock nudge** — "your window locks in 2 minutes" | 0–120s before a window closes | **needs n8n running** — see B |
 
+### Telegram Mini App — the same URL, no second deployment
+
+A Mini App is just an HTTPS page rendered in Telegram's WebView, so
+`https://streakr-opal.vercel.app` serves both surfaces. The bot's menu button
+points at it:
+
+```bash
+curl -X POST "https://api.telegram.org/bot<token>/setChatMenuButton" \
+  -H 'content-type: application/json' \
+  -d '{"menu_button":{"type":"web_app","text":"Open Streakr",
+       "web_app":{"url":"https://streakr-opal.vercel.app"}}}'
+```
+
+That needs no BotFather interaction. For a shareable direct link
+(`t.me/streak_r_bot/streakr`), send `/newapp` to
+[@BotFather](https://t.me/BotFather) and give it the same URL.
+
+Why this closes a loop rather than adding a surface: settled calls already post to
+the room's group chat, so the result and the next call now live in the same place.
+
+Three things had to change, and each was a real dead end otherwise:
+
+- **No wallet extension exists in a WebView.** `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID`
+  is unset, so the connector list degrades to injected-only — inside Telegram that
+  modal offers wallets that physically cannot connect. Onboarding detects the host
+  and leads with the demo wallet instead, which is a browser-generated key funded
+  by the server faucet and works identically in a WebView. The external option is
+  dropped rather than left to fail, and the copy says why.
+- **A Mini App opens at about half screen height.** Without `expand()` the call
+  buttons sit below the fold. `initTelegramMiniApp()` calls `ready()` + `expand()`
+  and matches the Telegram header to the app background.
+- **`Linking.openURL` becomes a blocked popup.** "View on-chain transaction" — the
+  one link that proves a call was real — silently did nothing. It now goes through
+  `Telegram.WebApp.openLink` when in Telegram and falls back to `openURL` in a
+  browser.
+
+Detection deliberately requires `platform !== "unknown"` or a non-empty
+`initData`, not merely the presence of `window.Telegram.WebApp`. The script is
+served on every page and defines that namespace in ordinary browsers too, so
+checking for it alone would hide the wallet button from someone who has MetaMask.
+
+`telegram-web-app.js` is added to the exported shell by
+`scripts/inject-telegram-webapp.mjs` rather than imported through Metro: it must
+define `window.Telegram.WebApp` synchronously before the bundle's first line, and
+modular HTML (`+html.tsx`) is an Expo Router feature this app doesn't use. The
+script asserts its own result, like the other build gates.
+
+`e2e/telegram.mjs` covers all three cases in one run — as a Mini App (with a
+locked stub, since the real script would otherwise overwrite it), as a plain
+website that must behave exactly as before, and with a genuine Telegram launch
+hash through the real script, which is what proves detection fires in production.
+
 ### Per-room chats
 
 Each room shows a code (`/link ABC123`). Send it in any Telegram group that has
@@ -892,6 +1077,24 @@ directly — the same shape as path A.
 
 ## Testing a full call cycle
 
+```text
+  Connect wallet ──► create or join a room ──► pick BTC | ETH + window
+        │
+        └──► tap Up or Down ──► confirm stake & risk ──► sign & submit
+                   │
+                   └──► wait for the window   (Lambda polls every 60 s)
+                              │
+                              └──► result updates live  (Firestore listener)
+                                        │
+                                        └──► streak / XP / badges update
+                                                  ├──► share the result card
+                                                  └──► CLAIM the win
+                                                       (redeem → balance moves)
+```
+
+<details>
+<summary>Same diagram as Mermaid</summary>
+
 ```mermaid
 flowchart LR
     A[Connect Wallet] --> B[Create / Join Room]
@@ -905,6 +1108,49 @@ flowchart LR
     I --> J[Share Result Card]
     I --> K["Claim the win<br/>(redeem → balance moves)"]
 ```
+
+</details>
+
+### Preflight: can it still onboard anyone?
+
+```bash
+cd app && node e2e/tools/preflight.mjs
+```
+
+Run this before any demo. Every new visitor is funded from **one treasury**, and
+if that treasury is dry the faucet returns `503 faucet is out of gas` and nobody
+can place a call. Nothing in the UI announces it — a visitor just sees an unfunded
+wallet, and the failure is invisible until someone tries.
+
+It has happened here. A day of automated runs took the treasury from 4.78 STT to
+0.052, because every probe wallet takes a grant (0.08 STT + 150 tUSDC) and each
+browser check signs in as a new wallet. Seven checks is seven grants.
+
+```
+treasury
+  2.212655 STT   60713.14 tUSDC
+  can onboard ~27 new wallet(s)   (gas allows 27, collateral allows 404)
+  ok    27 wallet(s) fundable
+>>> ready to demo
+```
+
+Two independent limits, and the preflight reports whichever binds first:
+
+| Limit | Symptom | Fix |
+|---|---|---|
+| Treasury **STT** below `FAUCET_GAS_FLOOR` (0.05) | faucet `503`, no wallet can be funded | the [Somnia testnet faucet](https://testnet.somnia.network) — STT can't be minted from a contract |
+| Treasury **tUSDC** below one grant (150) | faucet `503` | `cd chain-integration && npx tsx scripts/fund-collateral.ts` — the collateral token has a public `faucet()`, 10,000 per call |
+| Rolling 24h grant cap (`FAUCET_DAILY_CAP`, 60) | faucet `429` | nothing — it decays as grants age out of the window |
+
+Testing shouldn't be a one-way drain, so `e2e/tools/sweep.mjs` returns STT and
+tUSDC from throwaway probe wallets to the treasury:
+
+```bash
+node e2e/tools/sweep.mjs <privateKey>…    # recovered 3.00 STT + 422 tUSDC in one run
+```
+
+`e2e/claim.mjs` prints the key it generates precisely so a probe wallet can be
+swept afterwards rather than stranded.
 
 **Two things to know before demoing**, both venue behaviour rather than app bugs:
 
@@ -936,6 +1182,7 @@ node e2e/history.mjs  http://localhost:8899        # settled rows explain themse
 node e2e/align.mjs    http://localhost:8899 1512   # measures rendered layout geometry
 node e2e/scrollbox.mjs http://localhost:8899       # long lists cap and scroll in place
 node e2e/claim.mjs    http://localhost:8899 4      # redeeming a win raises the balance
+node e2e/telegram.mjs http://localhost:8899        # works as a Mini App AND as a website
 ```
 
 Each exits non-zero on failure. Point any of them at the deployed URL to check
@@ -1068,7 +1315,8 @@ A few of the docs-level points, in brief:
 - [x] Real DreamDEX Event Contracts integration, social/gamified UX, AI feature
 - [x] Full call cycle verified in-app: fund → call → on-chain → settle → streak
 - [x] Developer feedback — [`FEEDBACK.md`](FEEDBACK.md)
-- [x] Tests — 51 app unit tests, 20 backend unit tests, 9 browser checks
+- [x] Tests — 51 app unit tests, 20 backend unit tests, 10 browser checks
+- [x] Telegram Mini App — the same deployed URL, opened inside Telegram
 - [x] Telegram settlement notifications — live from the poller
 - [x] Demo walkthrough — [`DEMO.md`](DEMO.md)
 - [ ] Pre-lock nudge — workflow built and verified, but needs n8n hosted to run

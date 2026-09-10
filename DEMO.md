@@ -221,7 +221,7 @@ All verified, all reproducible:
 
 - **9 wins, 4 losses** settled from real on-chain outcomes
 - a real call: **5.00 staked → 16.67 returned** (16.666 shares at 0.300 entry)
-- **51 app unit tests, 20 backend unit tests, 9 browser checks**
+- **51 app unit tests, 20 backend unit tests, 10 browser checks**
 - **5 Lambdas**, settlement polling on a 1-minute schedule
 - an ERC-20 `approve` on Somnia costs **1,389,617 gas** — ~30x EVM intuition
 - `loadMarkets()` **18.06s** vs the targeted query **2.24s**, and the former's

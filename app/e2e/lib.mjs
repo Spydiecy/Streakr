@@ -30,11 +30,38 @@ function isBenignStreamTeardown(url, err) {
     err === "net::ERR_ABORTED" ||
     err === "net::ERR_CONNECTION_ABORTED" ||
     err.startsWith("net::ERR_QUIC_PROTOCOL_ERROR") ||
-    err === "net::ERR_TIMED_OUT"
+    err === "net::ERR_TIMED_OUT" ||
+    // The machine's own network changed (WiFi handover, VPN toggle). A held-open
+    // stream always dies with this; it says nothing about the app.
+    err === "net::ERR_NETWORK_CHANGED"
   );
 }
 
-export async function open({ url, width = 430, height = 950 }) {
+/**
+ * A console line that is only the echo of a failed request.
+ *
+ * Chrome logs "Failed to load resource: <reason>" alongside the request failure
+ * itself, but without the URL — so it can never be acted on, while the
+ * `requestfailed` handler above has the URL and decides properly. Dropping the
+ * echo for transport-level reasons avoids double-reporting the same event as an
+ * unattributable error.
+ *
+ * Deliberately excludes HTTP status failures. "Failed to load resource: the
+ * server responded with a status of 503" is how a broken backend announces
+ * itself — that one is exactly what caught the faucet running the treasury dry,
+ * and it must keep failing the run.
+ */
+function isFailedResourceEcho(msg) {
+  return /^Failed to load resource: net::ERR_[A-Z_]+$/.test(msg.trim());
+}
+
+/**
+ * `evaluateOnNewDocument` runs a script before any page script does. Needed to
+ * simulate a host that injects globals ahead of the bundle — Telegram's WebView
+ * defines `window.Telegram.WebApp` before the app's first line, so stubbing it
+ * after load would be too late for anything read during startup.
+ */
+export async function open({ url, width = 430, height = 950, evaluateOnNewDocument }) {
   const browser = await puppeteer.launch({
     executablePath: CHROME,
     headless: "new",
@@ -42,11 +69,15 @@ export async function open({ url, width = 430, height = 950 }) {
   });
   const page = await browser.newPage();
   await page.setViewport({ width, height });
+  if (evaluateOnNewDocument) await page.evaluateOnNewDocument(evaluateOnNewDocument);
 
   const problems = [];
   page.on("pageerror", (e) => problems.push(`PAGEERROR ${e.message}`));
   page.on("console", (m) => {
-    if (m.type() === "error") problems.push(`console ${m.text().slice(0, 240)}`);
+    if (m.type() !== "error") return;
+    const txt = m.text();
+    if (isFailedResourceEcho(txt)) return;
+    problems.push(`console ${txt.slice(0, 240)}`);
   });
   page.on("requestfailed", (r) => {
     const url = r.url();

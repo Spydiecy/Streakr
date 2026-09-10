@@ -38,6 +38,7 @@ Chrome is expected at the macOS default path; override with `CHROME=`.
 | `history.mjs` | Settled call rows explain the outcome, not just a WON/LOST badge |
 | `scrollbox.mjs` | Room calls / leaderboard / history cap out and scroll in place, and the section below stays reachable |
 | `claim.mjs` | Places both legs of one 15m market so a win is guaranteed, then redeems it and checks the collateral balance rose |
+| `telegram.mjs` | The same URL works as a Telegram Mini App *and* as an ordinary website, and the browser path is unchanged |
 
 `tools/` holds helpers rather than checks: `bal.mjs` (balances plus affordable
 writes), `gas.mjs` (treasury top-up for a probe wallet), `shot.mjs` /
