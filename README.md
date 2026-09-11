@@ -427,6 +427,7 @@ Streakr/
 │       ├── profile-market-reads.ts         listBinaryMarkets vs loadMarkets timings
 │       ├── check-cadence-labels.ts         catches 899s-indexed 15m series
 │       ├── list-cadences.ts               live cadences WITHOUT the app's allowlist
+│       ├── one-live-market.ts             soonest-expiring live market id
 │       ├── check-demo-wallet-funding.ts    proves a browser wallet can't bootstrap
 │       └── inspect-book.ts                 every resting level on both legs
 │
@@ -1299,9 +1300,26 @@ TELEGRAM_BOT_TOKEN=… TELEGRAM_CHAT_ID=… \
 
 cd chain-integration
 npx tsx scripts/list-cadences.ts                       # cadences the venue really runs
+npx tsx scripts/one-live-market.ts                     # id of the soonest-expiring live market
 npx tsx scripts/find-claimable.ts                      # unredeemed wins for the signer
 PK=0x… npx tsx scripts/redeem-position.ts [marketId]   # redeem with a specific key
 ```
+
+Verifying the nudge needs a market that's still trading, and short cadences roll
+every few minutes, so the two compose:
+
+```bash
+cd chain-integration && npx tsx scripts/one-live-market.ts   # -> 0x… BTC 4h 2664s
+cd ../backend/lambda
+NUDGE_URL=… N8N_SHARED_SECRET=… MARKET_ID=0x… MARKET_WINDOW=4h MARKET_SYMBOL=BTC \
+  npx tsx scripts/verify-nudge-fix.mjs
+```
+
+`verify-nudge-fix.mjs` points a linked room at that live market, calls the real
+endpoint, asserts the response carries the room's own `telegramChatId`, and
+restores the pointer in a `finally` — including restoring "no pointer at all".
+It's the only way to observe the per-room routing, since the endpoint reports
+nothing for a room whose pointer has gone stale.
 
 `purge-probe-data.mjs` exists because each browser check signs in as a fresh
 anonymous user and often creates a room, so a day of runs leaves dozens of
