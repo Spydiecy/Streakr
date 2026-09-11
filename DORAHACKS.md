@@ -12,6 +12,11 @@ That's Streakr.
 **Chain** · Somnia Shannon testnet · DreamDEX Event Contracts
 **Also runs as** · a Telegram Mini App, same URL, no second deployment
 
+| A live 5m market | Confirming a call | Inside Telegram |
+|---|---|---|
+| ![Room screen](https://raw.githubusercontent.com/Spydiecy/Streakr/main/docs/screenshots/03-room.png) | ![Call sheet](https://raw.githubusercontent.com/Spydiecy/Streakr/main/docs/screenshots/05-call-sheet.png) | ![Telegram Mini App](https://raw.githubusercontent.com/Spydiecy/Streakr/main/docs/screenshots/06-telegram-miniapp.png) |
+| 1:47 left · UP pays 5.71× · DOWN pays 1.18× · sparkline sized to the window | Risk 5.00 → win 28.57, and the sentence that makes it a game: *downside is capped at your stake* | The same deployed URL, leading with the funded wallet because no extension can exist in a WebView |
+
 ---
 
 ## By the numbers
@@ -57,6 +62,15 @@ No funding rate. No way to lose your rent.
 
 Every single call is a **wallet-signed transaction against a real order book.**
 Nothing in this project is simulated, anywhere.
+
+---
+
+## The room
+
+| The shared feed and board | Getting started |
+|---|---|
+| ![Room feed and leaderboard](https://raw.githubusercontent.com/Spydiecy/Streakr/main/docs/screenshots/04-room-feed.png) | ![Room list](https://raw.githubusercontent.com/Spydiecy/Streakr/main/docs/screenshots/02-rooms.png) |
+| Every call in the room, pending ones live, with the per-room leaderboard directly beneath — and a note confirming this room's results post to its own Telegram group | Public rooms with live market chips. A visitor is funded and placing a real on-chain call in under a minute |
 
 ---
 
@@ -260,7 +274,18 @@ impossible for a client to claim one, instead of merely not offering a button.
 | RainbowKit **2.2** + wagmi **2.19** | real wallets on web |
 | `expo-secure-store` / `localStorage` | platform-split key storage for the demo wallet |
 | Server-funded demo wallet | a browser-generated key holds 0 STT, and STT *is* gas — so it can't send **any** transaction, including the faucet call that would fund it. That circle can only be broken server-side |
+| Host detection | the same screen adapts to where it's running (below) |
 | **Custom `Proxy` fee override** | wraps the wallet client's write methods to pin `gas` and `maxFeePerGas`. The SDK applies its own 60 gwei even on the walletClient path, and fees are chosen before the transport is reachable — so a Proxy is the last available hook. Confirmed by decoding the raw signed transaction |
+
+**One screen, two hosts.** Detection requires a real `platform` or non-empty
+`initData`, not merely the presence of `window.Telegram` — the Mini App script is
+served on every page and defines that namespace in ordinary browsers too, so
+checking for it alone would hide the wallet button from someone who *has* MetaMask:
+
+| In a browser | In Telegram |
+|---|---|
+| ![Web onboarding](https://raw.githubusercontent.com/Spydiecy/Streakr/main/docs/screenshots/01-onboarding.png) | ![Telegram onboarding](https://raw.githubusercontent.com/Spydiecy/Streakr/main/docs/screenshots/06-telegram-miniapp.png) |
+| **Connect Wallet** first, demo wallet as the alternative | demo wallet only, and the copy explains why — offering a connector that physically cannot work is a dead end the user can't recover from |
 
 ### Data & auth
 

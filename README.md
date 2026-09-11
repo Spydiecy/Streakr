@@ -1269,12 +1269,17 @@ node e2e/tools/probe-window.mjs <url> [5m]    # is a window really tradable?
 node e2e/tools/probe-http.mjs <url> [load|signin|room]   # every non-2xx, with its URL
 node e2e/tools/shot.mjs <url> <out.png> [profile|room] [pk]
 node e2e/tools/shot-noname.mjs <url> <out.png>
+node e2e/tools/capture.mjs <url> [outDir]      # the submission screenshot set
 ```
 
 `probe-http.mjs` earns its place: the checks report a bare
 `Failed to load resource: 503` from the console, which names no URL. This drives
 sign-in and room creation — nothing 503s at page load — and prints the address
 behind it. That's how the drained-treasury faucet outage was found.
+
+`capture.mjs` takes the whole screenshot set (`docs/screenshots/`) in **one**
+sign-in. Each sign-in consumes a faucet grant from a shared treasury, so six shots
+across six runs would fund six wallets for nothing.
 
 `bal.mjs` reports **affordable writes** alongside the balance, because that's the
 number that predicts whether a call can be placed — at a 2,000,000 gas ceiling and
