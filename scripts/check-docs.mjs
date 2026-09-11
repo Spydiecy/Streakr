@@ -44,15 +44,20 @@ for (const file of files) {
     }
   });
 
-  // Tags inside a fenced block are text, not markup — this README's own repo tree
-  // contains the literal string "<details>" while describing this script, which an
-  // unfiltered count reported as an unclosed tag.
+  // A tag that appears as TEXT rather than markup must not be counted. Two ways
+  // that happens, both of which bit this checker on real files:
+  //   · inside a fenced block — the README's repo tree lists this very script and
+  //     spells out "<details>" while doing so
+  //   · inside inline backticks — DORAHACKS.md says the doc checks cover
+  //     "fence/`<details>` structure"
+  // So fenced lines are dropped entirely and inline code spans are stripped from
+  // the lines that remain.
   const outsideFences = [];
   {
     let inFence = false;
     lines.forEach((l, i) => {
       if (/^```/.test(l)) { inFence = !inFence; return; }
-      if (!inFence) outsideFences.push({ line: i + 1, text: l });
+      if (!inFence) outsideFences.push({ line: i + 1, text: l.replace(/`[^`]*`/g, "") });
     });
   }
 
