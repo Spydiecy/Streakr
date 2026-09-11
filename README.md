@@ -1044,6 +1044,27 @@ has to both call it on a schedule and post the result, which is n8n's job. With
 n8n down, nobody asks, so no nudges go out. Settlement notifications are
 unaffected.
 
+There's a second limit worth stating plainly, because it's a design consequence
+rather than a bug. The endpoint only considers a room whose stored
+`activeMarket.positionMarketId` is *still trading*, and that pointer is written by
+the room screen while the room's **creator** has it open. It goes stale as soon as
+they leave, and on a short cadence it goes stale fast — a 5m market is resolved
+five minutes later. So the nudge reminds people about the window a room was last
+pointed at, which means it can't reliably pull someone back to a room nobody is
+watching. `scripts/inspect-nudge.mjs` shows the pointer against the market's real
+on-chain state, which is the distinction an empty response hides:
+
+```
+test   activeMarket: ETH 1h   on-chain: status=resolved, expired 127209s ago
+       -> SKIPPED: pointer is stale
+```
+
+The nudge also used to post every reminder to the shared fallback chat. The n8n
+workflow reads `telegramChatId` and falls back if it's absent, but the handler
+never returned that field — so a room linked to its own group got its results
+there and its reminders somewhere else. Fixed; the nudge now routes per-room the
+same way settlement does.
+
 **A · Direct from the Lambda** *(live)*
 
 The poller posts the outcome straight to the Bot API. No hosting, nothing to keep

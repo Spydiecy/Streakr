@@ -28,6 +28,17 @@ export const handler = async (event: LambdaHttpEvent): Promise<LambdaHttpRespons
     symbol: string;
     window: string;
     secondsLeft: number;
+    /**
+     * The room's own Telegram chat, so a nudge lands where that room's
+     * settlements land.
+     *
+     * The n8n workflow already reads `telegramChatId` and falls back to the
+     * default chat, but this handler never returned the field — so every nudge
+     * silently went to the shared fallback while settlements went per-room. A
+     * room linked to its own group got its results there and its reminders
+     * somewhere else entirely.
+     */
+    telegramChatId?: string;
   }[] = [];
 
   for (const doc of roomsSnap.docs) {
@@ -46,6 +57,7 @@ export const handler = async (event: LambdaHttpEvent): Promise<LambdaHttpRespons
           symbol: room.activeMarket!.symbol,
           window: room.activeMarket!.window,
           secondsLeft,
+          ...(room.telegramChatId ? { telegramChatId: String(room.telegramChatId) } : {}),
         });
       }
     } catch (e) {
