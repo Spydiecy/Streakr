@@ -25,7 +25,8 @@ Five minutes of prep that removes almost every way a take can fail.
 Two venue realities to work around. Neither is a bug, but both will bite an
 unprepared take.
 
-**Use a 15m window** if you want to show settlement on camera. 1h and 4h are
+**Use a 5m window** if you want to show settlement on camera — it's the fastest the
+venue runs, and usually the most liquid. 15m also resolves inside a take. 1h and 4h are
 often better priced but won't resolve inside a recording.
 
 **Check both prices before you tap.** The venue frequently quotes only one leg —
@@ -221,7 +222,7 @@ All verified, all reproducible:
 
 - **9 wins, 4 losses** settled from real on-chain outcomes
 - a real call: **5.00 staked → 16.67 returned** (16.666 shares at 0.300 entry)
-- **51 app unit tests, 20 backend unit tests, 10 browser checks**
+- **81 app unit tests, 20 backend unit tests, 10 browser checks**
 - **5 Lambdas**, settlement polling on a 1-minute schedule
 - an ERC-20 `approve` on Somnia costs **1,389,617 gas** — ~30x EVM intuition
 - `loadMarkets()` **18.06s** vs the targeted query **2.24s**, and the former's

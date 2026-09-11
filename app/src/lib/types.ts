@@ -19,7 +19,7 @@ export type Symbol_ = "BTC" | "ETH";
  * broken whenever neither happened to be running, so the UI now offers
  * whichever cadences are actually live (see eventContracts.listLiveMarkets).
  */
-export type WindowLength = "15m" | "1h" | "4h" | "1d" | "1w";
+export type WindowLength = "5m" | "15m" | "1h" | "4h" | "1d" | "1w";
 
 export interface UserDoc {
   uid: string;

@@ -42,6 +42,10 @@ export interface PriceSeries {
  */
 function frameFor(window: WindowLength | null): { timeframe: "1m" | "1h"; limit: number } {
   switch (window) {
+    // Half an hour of minute candles: enough context to read a 5-minute call
+    // without compressing the move that matters into a couple of pixels.
+    case "5m":
+      return { timeframe: "1m", limit: 30 };
     case "15m":
       return { timeframe: "1m", limit: 60 };
     case "1h":

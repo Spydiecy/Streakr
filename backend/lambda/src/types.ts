@@ -8,7 +8,13 @@
 export type CallStatus = "pending" | "won" | "lost" | "void";
 export type Direction = "up" | "down";
 export type Symbol_ = "BTC" | "ETH";
-export type WindowLength = "15m" | "1h";
+/**
+ * Kept in step with the app's own WindowLength (app/src/lib/types.ts). This had
+ * drifted to just "15m" | "1h" while the app already labelled 4h, 1d and 1w, so
+ * a settled 4h call was typed as something that couldn't exist — it only stayed
+ * harmless because nothing here switches on the value.
+ */
+export type WindowLength = "5m" | "15m" | "1h" | "4h" | "1d" | "1w";
 
 export interface UserDoc {
   uid: string;

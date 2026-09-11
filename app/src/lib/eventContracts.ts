@@ -27,16 +27,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import type { Direction, Symbol_, WindowLength } from "./types";
 import type { CallSigner } from "./walletTypes";
 
-const WINDOW_SECONDS: Record<WindowLength, number> = {
-  "15m": 15 * 60,
-  "1h": 60 * 60,
-  "4h": 4 * 60 * 60,
-  "1d": 24 * 60 * 60,
-  "1w": 7 * 24 * 60 * 60,
-};
-
-/** Display order for whichever cadences happen to be live. */
-export const WINDOW_ORDER: WindowLength[] = ["15m", "1h", "4h", "1d", "1w"];
+import { labelWindow } from "./windows";
 
 /** Whether the SDK's market registry has been pulled at least once. */
 let _registryLoaded = false;
@@ -61,19 +52,6 @@ export function prewarmMarkets(): void {
     // Best-effort warmup; the Room screen will retry and surface any error.
     _prewarm = null;
   });
-}
-
-/**
- * The cadences actually available for an asset right now, in display order.
- *
- * The venue rotates which series it runs, so this is read from live markets
- * rather than assumed. Returns [] when nothing is tradable for the asset.
- */
-export function availableWindows(markets: LiveMarketInfo[], symbol: Symbol_): WindowLength[] {
-  const live = new Set(
-    markets.filter((m) => m.symbol === symbol && m.window !== null).map((m) => m.window as WindowLength),
-  );
-  return WINDOW_ORDER.filter((w) => live.has(w));
 }
 
 export interface LiveMarketInfo {
@@ -107,37 +85,9 @@ export interface LiveMarketInfo {
 // callers already import market types from this module.
 export { askFor, quoteFor, impliedChance, type Quote, type BookSide } from "./quote";
 
-/**
- * Map a raw `intervalSec` onto one of Streakr's window labels.
- *
- * Snaps to the NEAREST cadence rung rather than requiring an exact match. The
- * indexer derives a series' interval as `expiry − tradingStart`, and trading
- * routinely opens a second or two late, so a 1d series is indexed as 86398 or
- * 86399 as often as 86400 (the SDK documents ±CADENCE_TOLERANCE_SEC on its own
- * `intervalSec` filter for exactly this reason).
- *
- * An exact `===` here was silently returning null for those off-by-a-second
- * rolls. A null window is dropped by `availableWindows`, which is what made the
- * 4h/1d chips vanish and reappear at random — the chip set was really tracking
- * whether the venue happened to have opened that window on the exact second.
- *
- * Tolerance scales with the cadence: a second of drift is nothing on a 1d
- * window but shouldn't merge 15m into 1h, so it's the tighter of 1% or a
- * quarter of the gap to the neighbouring rung.
- */
-function labelWindow(intervalSec: number): WindowLength | null {
-  if (!Number.isFinite(intervalSec) || intervalSec <= 0) return null;
-
-  let best: { label: WindowLength; secs: number; delta: number } | null = null;
-  for (const [label, secs] of Object.entries(WINDOW_SECONDS) as [WindowLength, number][]) {
-    const delta = Math.abs(secs - intervalSec);
-    if (!best || delta < best.delta) best = { label, secs, delta };
-  }
-  if (!best) return null;
-
-  const tolerance = Math.max(10, best.secs * 0.01);
-  return best.delta <= tolerance ? best.label : null;
-}
+// Cadence labelling lives in a leaf module so it can be unit-tested — importing
+// anything from here drags in the SDK. See windows.ts.
+export { WINDOW_SECONDS, WINDOW_ORDER, labelWindow, availableWindows } from "./windows";
 
 /**
  * Every currently-Trading BTC/ETH binary market on the DreamDEX venue, with

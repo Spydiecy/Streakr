@@ -97,14 +97,15 @@ if (want > 0) {
     return false;
   };
 
-  // The room opens on whatever window it defaults to (1h), which would mean
-  // waiting an hour for settlement. 15m is the shortest.
-  console.log("\n2.0 selecting the 15m window");
-  console.log("   selected:", await tap(page, "15m"));
-  await waitForMarket("after selecting 15m");
+  // The room opens on whatever window it defaults to, which may be 1h — an hour
+  // of waiting for settlement. 5m is the shortest the venue runs, so a full
+  // place → settle → claim cycle fits in one run.
+  console.log("\n2.0 selecting the 5m window");
+  console.log("   selected:", await tap(page, "5m"));
+  await waitForMarket("after selecting 5m");
   const before = await text(page);
   const left = (before.match(/(?:^|\n)([0-9]+[hm]?[: ][0-9]+[hm]?)\nleft/) || [])[1] ?? "?";
-  const label = (before.match(/(BTC|ETH) (15m|1h|4h|1d)/) || [])[0] ?? "?";
+  const label = (before.match(/(BTC|ETH) (5m|15m|1h|4h|1d)/) || [])[0] ?? "?";
   console.log(`   market: ${label}   time left: ${left}`);
 
   // SIDES lets a run top up a leg that failed previously, so both directions end
@@ -138,10 +139,10 @@ if (want > 0) {
     await tap(page, "Back to room");
     await wait(4000);
     await waitForMarket("back in the room");
-    // The reset re-mounts the room on its default window, so 15m has to be
+    // The reset re-mounts the room on its default window, so 5m has to be
     // re-selected — and waited for again.
-    await tap(page, "15m");
-    await waitForMarket("after re-selecting 15m");
+    await tap(page, "5m");
+    await waitForMarket("after re-selecting 5m");
   }
 }
 

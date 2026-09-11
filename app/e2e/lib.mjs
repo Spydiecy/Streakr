@@ -197,7 +197,7 @@ export function marketCard(page) {
 
     const label =
       leaves.map((e) => e.textContent.trim()).find((t) =>
-        /^(BTC|ETH) (15m|1h|4h|1d|1w)$/.test(t),
+        /^(BTC|ETH) (5m|15m|1h|4h|1d|1w)$/.test(t),
       ) ?? null;
 
     let big = null;
@@ -243,7 +243,10 @@ export function windowChips(page) {
     for (const el of Array.from(document.querySelectorAll("div,span"))) {
       if (el.childElementCount || el.closest('[aria-hidden="true"]')) continue;
       const t = el.textContent.trim();
-      if (!/^(15m|1h|4h|1d|1w)$/.test(t)) continue;
+      // Must list every cadence the app can label, or a newly-supported window
+      // reads as missing — 5m rendered correctly while this said the chips were
+      // [15m,1h,4h,1d].
+      if (!/^(5m|15m|1h|4h|1d|1w)$/.test(t)) continue;
       const r = el.getBoundingClientRect();
       if (r.width > 4 && r.height > 4) out.add(t);
     }

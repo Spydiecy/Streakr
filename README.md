@@ -41,7 +41,7 @@ DreamDEX Event Contracts let anyone pick BTC or ETH, choose a window, and call
 **Up** or **Down**. Right, and the position redeems at a fixed payout. Wrong, and
 you lose exactly your stake — nothing more, no margin call, no liquidation.
 
-Streakr offers whichever of 15m / 1h / 4h / 1d the venue is actually running,
+Streakr offers whichever of 5m / 15m / 1h / 4h / 1d the venue is actually running,
 read from live markets rather than hard-coded, because the venue rotates its
 cadences and a fixed list shows the user an empty screen through no fault of
 their own.
@@ -57,7 +57,7 @@ Streakr wraps that primitive in a social layer:
 | ⭐ **XP & badges** | First Call, 3/5/10-streak, and Room Champion badges, all server-verified |
 | 🏆 **Leaderboards** | Per-room and global, ranked by streak then XP, live via Firestore listeners |
 | 🧾 **Explained results** | Each settled call says what actually happened — "Closed Up — won 16.67 tUSDC (+11.67 profit)" — with the resolved leg derived from the verdict and the amount valued from the on-chain share count |
-| 📈 **Price chart** | A sparkline of recent closes for the asset being called, sized to the window (minute candles for 15m, hourly for 1d), from the same oracle feed the momentum line reads — so the chart and the AI take can't contradict each other |
+| 📈 **Price chart** | A sparkline of recent closes for the asset being called, sized to the window (minute candles over 30m for a 5m call, hourly over 2d for a 1d call), from the same oracle feed the momentum line reads — so the chart and the AI take can't contradict each other |
 | 🔔 **Telegram** | Every settlement posts to the room's own group chat — linked with `/link CODE` — carrying the streak and a link to the transaction, so a result is verifiable rather than asserted |
 | 💰 **Claim winnings** | A resolved Event Contract doesn't pay out on its own — winning outcome tokens sit in the wallet until they're burned for the collateral behind them. Won calls carry a **Claim** action that redeems the position and moves the tUSDC into the wallet for real |
 | 🖼️ **Result Cards** | A shareable SVG generated the moment a call settles — the viral loop |
@@ -313,7 +313,7 @@ four lines of the diagram rather than something the poller can do — see
   displayName                isPublic                   uid                 FK
   xp                         memberUids[]               symbol   BTC | ETH
   currentStreak              createdBy                  direction   up | down
-  bestStreak                 activeMarket{}             window   15m|1h|4h|1d
+  bestStreak                 activeMarket{}             window  5m|15m|1h|4h|1d
   badges[]                                              stakeUsdso
                                                         txHash
                                                         positionId
@@ -426,6 +426,7 @@ Streakr/
 │       ├── repro-approve-revert.ts         minimal repro of the approve revert
 │       ├── profile-market-reads.ts         listBinaryMarkets vs loadMarkets timings
 │       ├── check-cadence-labels.ts         catches 899s-indexed 15m series
+│       ├── list-cadences.ts               live cadences WITHOUT the app's allowlist
 │       ├── check-demo-wallet-funding.ts    proves a browser wallet can't bootstrap
 │       └── inspect-book.ts                 every resting level on both legs
 │
@@ -461,6 +462,7 @@ Streakr/
 │   │   │   ├── eventContracts.ts    market discovery, books, placeCall, claim, faucet
 │   │   │   ├── errors.ts            chain/SDK/Firestore errors -> human sentences
 │   │   │   ├── quote.ts             leaf module: per-leg pricing + book quality
+│   │   │   ├── windows.ts           leaf module: cadence -> window label (30 tests)
 │   │   │   ├── callOutcome.ts       leaf module: what a settled call actually did
 │   │   │   ├── priceFeed.ts         oracle candles for the sparkline
 │   │   │   ├── firestoreApi.ts      every Firestore read/write + live listeners
@@ -747,10 +749,42 @@ dropped, and the UI's window chips appear and disappear at random. Caught live b
 to the nearest rung within a scaled tolerance.
 
 **The venue rotates cadences.** At one point only 4h and 1d were live; at another
-all of 15m/1h/4h/1d. It also runs series Streakr doesn't surface (1m, 5m, and
-oddities like 3s and 52s). Hard-coding a window list shows the user an empty
-screen through no fault of their own, so the list is derived from live markets via
+all of 5m/15m/1h/4h/1d. Hard-coding a window list shows the user an empty screen
+through no fault of their own, so the list is derived from live markets via
 `availableWindows()`.
+
+**But "derived" only means derived from cadences we have a label for**, and that
+distinction hid a whole window. An earlier version of this section listed 5m
+alongside genuine noise (1m, and oddities like 3s and 52s) as series Streakr
+deliberately didn't surface. Re-measuring with
+`chain-integration/scripts/list-cadences.ts`, which lists live cadences with the
+app's allowlist taken out of the way:
+
+```
+cadence   seconds  markets  assets     app shows it as
+5m        300      4        ETH,BTC    *** DROPPED — no label ***
+15m       900      2        BTC,ETH    15m
+1h        3600     2        ETH,BTC    1h
+4h        14400    2        BTC,ETH    4h
+1d        86400    2        ETH,BTC    1d
+```
+
+5m was not noise. It was the venue's **most-populated cadence**, on both assets,
+with quoted books on both legs — and the fastest-settling window available, which
+makes it the best one for a live demo. `labelWindow(300)` snapped it to the 15m
+rung, missed the tolerance by 600s, returned `null`, and `availableWindows()`
+dropped it. No error, no log, nothing on screen.
+
+That failure mode is why the labelling logic now lives in a leaf module
+(`app/src/lib/windows.ts`) with 30 unit tests: it can silently hide real,
+tradable markets, and both bugs it has had were found by querying the chain
+rather than by using the app. The tests assert the drift cases, that neighbouring
+rungs can't merge, and that no two rungs sit inside each other's tolerance — so
+adding a cadence later can't quietly break an existing one.
+
+1m and the sub-minute oddities stay unlabelled on purpose: a window that closes
+faster than a signed transaction confirms isn't a game, it's a coin flip with
+extra steps.
 
 </details>
 
@@ -880,7 +914,8 @@ cp .env.example .env    # Firebase config + the 3 Lambda Function URLs
 npm run web              # fastest for a demo
 
 npm run typecheck        # tsc --noEmit
-npm run test             # 51 unit tests: error mapping, call outcomes, quote/book maths
+npm run test             # 81 unit tests: error mapping, call outcomes, quote/book
+                         # maths, cadence labelling
 npm run build:web        # clean export + asset relocation + build gates
 ```
 
@@ -1157,9 +1192,9 @@ swept afterwards rather than stranded.
 - **Check the book before tapping.** The venue frequently quotes only one leg
   (`UP 0.020  DOWN —`). Calling the unpriced side cannot fill; the app says
   "Nobody on the other side" honestly, but pick the side showing a number.
-- **15m windows settle inside a demo**; 1h takes up to an hour. Both are usually
-  live, and the window chips only ever show cadences the venue is actually
-  running.
+- **5m windows settle inside a demo**, and 15m usually will too; 1h takes up to an
+  hour. The window chips only ever show cadences the venue is actually running, so
+  pick the shortest one on screen.
 
 ### Browser checks
 
@@ -1315,7 +1350,7 @@ A few of the docs-level points, in brief:
 - [x] Real DreamDEX Event Contracts integration, social/gamified UX, AI feature
 - [x] Full call cycle verified in-app: fund → call → on-chain → settle → streak
 - [x] Developer feedback — [`FEEDBACK.md`](FEEDBACK.md)
-- [x] Tests — 51 app unit tests, 20 backend unit tests, 10 browser checks
+- [x] Tests — 81 app unit tests, 20 backend unit tests, 10 browser checks
 - [x] Telegram Mini App — the same deployed URL, opened inside Telegram
 - [x] Telegram settlement notifications — live from the poller
 - [x] Demo walkthrough — [`DEMO.md`](DEMO.md)

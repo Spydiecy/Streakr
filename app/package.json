@@ -45,7 +45,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/lib/__tests__/errors.test.ts && tsx src/lib/__tests__/callOutcome.test.ts && tsx src/lib/__tests__/quote.test.ts",
+    "test": "tsx src/lib/__tests__/errors.test.ts && tsx src/lib/__tests__/callOutcome.test.ts && tsx src/lib/__tests__/quote.test.ts && tsx src/lib/__tests__/windows.test.ts",
     "clean": "rm -rf dist .expo node_modules/.cache",
     "build:web": "npm run clean && expo export --platform web --clear && node scripts/relocate-vendor-assets.mjs dist && node scripts/inject-telegram-webapp.mjs dist",
     "postbuild:web": "node scripts/verify-web-build.mjs dist"
