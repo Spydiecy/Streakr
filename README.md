@@ -8,7 +8,10 @@ Call BTC or ETH. Up or Down. Real wallet-signed calls, settled automatically fro
 No liquidation. No margin. Loss capped at your stake.
 
 [![Live Demo](https://img.shields.io/badge/demo-streakr--opal.vercel.app-7c5cff?style=for-the-badge)](https://streakr-opal.vercel.app)
+[![Telegram Mini App](https://img.shields.io/badge/telegram-Mini%20App-229ED9?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/streak_r_bot)
 [![Network](https://img.shields.io/badge/network-Somnia%20Shannon%20Testnet-22d3ee?style=for-the-badge)](https://docs.dreamdex.io)
+
+**Try it in Telegram:** [t.me/streak_r_bot](https://t.me/streak_r_bot) → tap **Open Streakr**
 
 </div>
 
@@ -972,6 +975,8 @@ Two notifications exist, and they are **not** delivered the same way:
 
 ### Telegram Mini App — the same URL, no second deployment
 
+**Live now:** [t.me/streak_r_bot](https://t.me/streak_r_bot) → tap **Open Streakr**.
+
 A Mini App is just an HTTPS page rendered in Telegram's WebView, so
 `https://streakr-opal.vercel.app` serves both surfaces — same deployment, no second
 build, no separate hosting.
@@ -1080,7 +1085,7 @@ hash through the real script, which is what proves detection fires in production
 ### Per-room chats
 
 Each room shows a code (`/link ABC123`). Send it in any Telegram group that has
-`@streak_r_bot` in it, and that room's settled calls post there instead of the
+[`@streak_r_bot`](https://t.me/streak_r_bot) in it, and that room's settled calls post there instead of the
 shared fallback chat. `/unlink` detaches.
 
 `streakr-telegram-webhook` handles it. A webhook rather than polling

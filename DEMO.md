@@ -4,6 +4,7 @@ A ~3 minute walkthrough of Streakr on Somnia Shannon testnet, structured so the
 strongest claim lands first and every number on screen is real.
 
 **Live app:** https://streakr-opal.vercel.app
+**Telegram Mini App:** https://t.me/streak_r_bot → tap **Open Streakr**
 
 ---
 

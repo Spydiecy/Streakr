@@ -8,9 +8,12 @@ transaction link, and they've lost their streak in front of everyone.
 That's Streakr.
 
 **Live app** · [streakr-opal.vercel.app](https://streakr-opal.vercel.app)
+**Telegram Mini App** · [t.me/streak_r_bot](https://t.me/streak_r_bot) → tap **Open Streakr**
 **Code** · [github.com/Spydiecy/Streakr](https://github.com/Spydiecy/Streakr)
 **Chain** · Somnia Shannon testnet · DreamDEX Event Contracts
-**Also runs as** · a Telegram Mini App, same URL, no second deployment
+
+The Telegram link runs the *same deployment* as the web app — same URL, no second
+build, no separate hosting.
 
 | A live 5m market | Confirming a call | Inside Telegram |
 |---|---|---|
