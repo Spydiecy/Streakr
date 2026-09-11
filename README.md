@@ -973,19 +973,74 @@ Two notifications exist, and they are **not** delivered the same way:
 ### Telegram Mini App — the same URL, no second deployment
 
 A Mini App is just an HTTPS page rendered in Telegram's WebView, so
-`https://streakr-opal.vercel.app` serves both surfaces. The bot's menu button
-points at it:
+`https://streakr-opal.vercel.app` serves both surfaces — same deployment, no second
+build, no separate hosting.
+
+#### Setup, from nothing to working
+
+**1 · A bot.** `/newbot` to [@BotFather](https://t.me/BotFather) if you don't have
+one. Keep the token; everything below needs it.
+
+**2 · Point the bot's menu button at the app.** This is the whole integration, and
+it needs no BotFather interaction at all:
 
 ```bash
-curl -X POST "https://api.telegram.org/bot<token>/setChatMenuButton" \
+TOKEN=<your bot token>
+curl -X POST "https://api.telegram.org/bot$TOKEN/setChatMenuButton" \
   -H 'content-type: application/json' \
   -d '{"menu_button":{"type":"web_app","text":"Open Streakr",
        "web_app":{"url":"https://streakr-opal.vercel.app"}}}'
 ```
 
-That needs no BotFather interaction. For a shareable direct link
-(`t.me/streak_r_bot/streakr`), send `/newapp` to
-[@BotFather](https://t.me/BotFather) and give it the same URL.
+Verify, then open a DM with the bot — there's now an **Open Streakr** button beside
+the message box:
+
+```bash
+curl "https://api.telegram.org/bot$TOKEN/getChatMenuButton"
+```
+
+**3 · Optional: a shareable direct link.** Send `/newapp` to BotFather, pick the
+bot, and give it the same URL. You get `https://t.me/<botname>/<appname>`, which
+opens the Mini App from anywhere — including a link in a group. BotFather also asks
+for a title, description, a 640×360 photo and an optional GIF; only the URL affects
+behaviour.
+
+**4 · Optional: results in a group.** Add the bot to a group, then send
+`/link <CODE>` using the code shown on that room's screen. From then on that room's
+settled calls post there instead of the shared fallback chat, and `/unlink`
+detaches. This works even with bot privacy mode on, because Telegram always
+delivers slash-commands to a bot — a plain message would not be seen.
+
+#### What we had to change for it to actually work
+
+Three things were dead ends otherwise, and none of them are obvious until you open
+the app inside Telegram:
+
+- **No wallet extension exists in a WebView.** `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID`
+  is unset, so the connector list degrades to injected-only — inside Telegram that
+  modal offers wallets that physically cannot connect. Onboarding detects the host
+  and leads with the demo wallet instead, which is a browser-generated key funded by
+  the server faucet and works identically in a WebView. The external option is
+  dropped rather than left to fail, and the copy says why.
+- **A Mini App opens at about half screen height.** Without `expand()` the call
+  buttons sit below the fold. `initTelegramMiniApp()` calls `ready()` + `expand()`
+  and matches the Telegram header to the app background.
+- **`Linking.openURL` becomes a blocked popup.** "View on-chain transaction" — the
+  one link that proves a call was real — silently did nothing. It now routes through
+  `Telegram.WebApp.openLink` when in Telegram and falls back to `openURL` in a
+  browser.
+
+#### Why detection is stricter than it looks
+
+Detection requires `platform !== "unknown"` **or** a non-empty `initData`, not merely
+the presence of `window.Telegram.WebApp`. `telegram-web-app.js` is served on every
+page and defines that namespace in ordinary browsers too, so checking for it alone
+would hide the wallet button from someone who has MetaMask.
+
+Telegram itself passes launch parameters in the URL fragment
+(`#tgWebAppPlatform=android&tgWebAppVersion=7.0&…`) and the real script reads them
+from there — which is what `e2e/telegram.mjs` exercises directly, so a change in that
+contract fails a check rather than silently disabling the Mini App path.
 
 Why this closes a loop rather than adding a surface: settled calls already post to
 the room's group chat, so the result and the next call now live in the same place.

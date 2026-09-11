@@ -16,7 +16,7 @@ Five minutes of prep that removes almost every way a take can fail.
 | **Turn off ad/privacy blockers** for the site | They block `firestore.googleapis.com`, and rooms silently stop saving. There's a banner for it now, but don't fight it on camera |
 | **Use a browser profile you've already connected once** | The wallet is already funded, so you skip the ~20s faucet wait. A fresh profile means a fresh wallet and a fresh grant |
 | **Don't hit "Disconnect wallet"** between takes | It deletes the key, so the next connect generates a *different* address and burns another treasury grant |
-| **Check the treasury** | `npx tsx chain-integration/scripts/check-demo-wallet-funding.ts` — STT is the binding constraint and has no self-serve faucet |
+| **Run the preflight** | `cd app && node e2e/tools/preflight.mjs` — answers "can this still onboard anyone?". If the treasury is dry the faucet returns 503 and *nobody* can place a call, with nothing in the UI to say so |
 | **Have the Telegram group visible** | Second monitor or a phone. The settlement message is the payoff shot |
 | **Pick your window before recording** | See below — this is the one thing most likely to waste a take |
 
@@ -133,7 +133,7 @@ arrives. **This is the shot.** Have the group visible.
 
 Read the message aloud:
 
-> "'Spy called BTC UP 15m and won. Returned 16.67 tUSDC. Streak: 1.' With a link
+> "'Spy called BTC UP 5m and won. Returned 8.16 tUSDC. Streak: 1.' With a link
 > to the transaction — so the result is verifiable, not asserted."
 
 ### 2:15 — Claim the winnings
@@ -153,7 +153,28 @@ profile goes up.
 the settlement model rather than assuming it worked like a centralised exchange.
 It's also the fix for the single most confusing thing a first-time user hits.
 
-### 2:25 — Show a loss
+### 2:30 — The same app, inside Telegram
+
+Stay in the group chat you just showed the result in. Tap the bot's **Open Streakr**
+menu button. The app opens *over* the conversation.
+
+> "And because the settlement notification lands in Telegram, that's where we put
+> the app. This is the same deployment — the same URL, not a port — running as a
+> Telegram Mini App. So you read the result, tap, and place your next call without
+> leaving the chat."
+
+Point at the wallet options while it's open:
+
+> "One thing we had to handle: there's no browser extension inside Telegram, so a
+> 'Connect Wallet' button here would open a list of wallets that physically can't
+> connect. The app detects the host and leads with the funded demo wallet instead —
+> and says why."
+
+**Why show this last:** it reframes the whole demo. Everything before it was a good
+web app; this makes it a thing that lives where your friends already are. It's also
+a 15-second beat that costs you nothing to include.
+
+### 2:45 — Show a loss
 
 Either from history or by calling the unlikely side deliberately.
 
@@ -164,7 +185,7 @@ Either from history or by calling the unlikely side deliberately.
 product rather than a happy path, and the capped-loss story is genuinely your
 strongest risk argument.
 
-### 2:40 — Close on what you learned
+### 2:55 — Close on what you learned
 
 > "The hardest part wasn't the app. Somnia's SDK signs every transaction with a
 > ten-million gas limit at a fixed sixty gwei, which means a node demands 0.6 STT
@@ -191,6 +212,8 @@ memorable, and it's true.
 | Window chips vanish | Venue rotated cadences | They're derived from live markets; pick one that's showing |
 | Rooms won't save | Ad blocker on `googleapis.com` | Disable for the site and reload |
 | Countdown at `0:0x` | Window about to lock | Don't start a call; wait for the next roll |
+| Faucet returns 503 | Treasury out of STT | `node app/e2e/tools/preflight.mjs` confirms it; top up from the Somnia faucet |
+| Mini App opens short | Telegram sheet not expanded | Swipe up once. `expand()` is called on mount, but a cold WebView occasionally lands small |
 
 ---
 
@@ -199,10 +222,10 @@ memorable, and it's true.
 Be accurate if asked. The gap is small and stating it plainly is better than
 being caught.
 
-**Live:** the app, five Lambdas, settlement polling every minute, the server-side
-faucet, Mistral-phrased sentiment, Result Card SVGs, and **settlement
-notifications to Telegram** (posted directly by the poller — no hosting
-dependency).
+**Live:** the app, six Lambdas, settlement polling every minute, the server-side
+faucet, Mistral-phrased sentiment, Result Card SVGs, the **Telegram Mini App**, and
+**settlement notifications to Telegram** (posted directly by the poller — no
+hosting dependency).
 
 **Built, not running:** the **pre-lock nudge** ("your window locks in 2 minutes").
 It needs n8n running to both schedule and send, and n8n isn't hosted. The two
@@ -220,10 +243,12 @@ instead.
 
 All verified, all reproducible:
 
-- **9 wins, 4 losses** settled from real on-chain outcomes
 - a real call: **5.00 staked → 16.67 returned** (16.666 shares at 0.300 entry)
-- **81 app unit tests, 20 backend unit tests, 10 browser checks**
-- **5 Lambdas**, settlement polling on a 1-minute schedule
+- a real claim: collateral **140.408414 → 148.564414 tUSDC**, exactly the payout
+- **81 app unit tests, 20 backend unit tests, 10 browser checks**, no mocks
+- **6 Lambdas**, settlement polling on a 1-minute schedule
+- **5 window cadences** offered, all derived from live venue state
+- gas a wallet must hold per write: **0.6 STT → 0.024 STT** after measuring it
 - an ERC-20 `approve` on Somnia costs **1,389,617 gas** — ~30x EVM intuition
 - `loadMarkets()` **18.06s** vs the targeted query **2.24s**, and the former's
   `active` flag *hid* a live market we then traded successfully
