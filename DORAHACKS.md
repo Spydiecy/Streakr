@@ -3,10 +3,10 @@
 **Call BTC or ETH. Up or Down. Build a streak with your friends — every call a real
 on-chain trade on DreamDEX Event Contracts.**
 
-Live app · [streakr-opal.vercel.app](https://streakr-opal.vercel.app)
-Code · [github.com/Spydiecy/Streakr](https://github.com/Spydiecy/Streakr)
-Chain · Somnia Shannon testnet
-Also runs as a **Telegram Mini App** — same URL, no second deployment
+**Live app** · [streakr-opal.vercel.app](https://streakr-opal.vercel.app)
+**Code** · [github.com/Spydiecy/Streakr](https://github.com/Spydiecy/Streakr)
+**Chain** · Somnia Shannon testnet
+**Also runs as** · a Telegram Mini App, same URL, no second deployment
 
 ---
 
@@ -107,9 +107,9 @@ one part of settlement that can't be automated away.
 
 Every figure below was read back off-chain or out of the database after the fact.
 
-**A verified win, end to end:**
+**A verified win, end to end**
 
-| | |
+| Field | Value |
 |---|---|
 | Call | BTC **UP**, 15m window |
 | Staked | 5.00 tUSDC |
@@ -119,7 +119,7 @@ Every figure below was read back off-chain or out of the database after the fact
 | Written | streak 1, +20 XP, `first_call` badge, room + global leaderboard |
 | Notified | posted to the room's Telegram with the tx link |
 
-**A verified claim, on the fastest window:**
+**A verified claim, on the fastest window**
 
 ```
 BTC up 5m  →  WON, payout 8.156 tUSDC
@@ -133,35 +133,6 @@ making every win look like break-even.
 
 Losses are shown just as plainly. The streak resets to zero and the loss is exactly
 the stake — that cap is the reason this works as a casual game.
-
----
-
-## Built on DreamDEX Event Contracts
-
-- **`packages/ec-core`**, not the spot/perp CLOB path. Event Contracts have their
-  own package, their own preflight (`ec-doctor.ts`) and their own reference
-  strategies. The top-level Bot Kit quickstart points at `Pool.load` / `topOfBook`,
-  which is a different product.
-- **Venue** `0x679795a0195a1b76cdebb7c51d74e058aee92919b8c3389af86ef24535e8a28c`
-- **Windows are derived from live markets, never hard-coded.** The venue rotates
-  which cadences it runs — at one point only 4h and 1d were live. A fixed list
-  shows the user an empty screen through no fault of their own.
-- **Settlement reads the authoritative on-chain `MarketStatus`**, never the
-  seconds-lagging indexer. `judgeCall()` only ever reads `winningOutcome`.
-- **Each leg is priced from its own asks.** Deriving DOWN as `1 − yesBid` moves the
-  price the *wrong* way once slippage is added, so the order never crosses and
-  returns unfilled with no error at all.
-
-Cadences the venue actually runs, measured with our own tooling:
-
-```
-cadence   seconds  live markets  assets
-5m        300      4             ETH, BTC     ← most liquid, settles in a demo
-15m       900      2             BTC, ETH
-1h        3600     2             ETH, BTC
-4h        14400    2             BTC, ETH
-1d        86400    2             ETH, BTC
-```
 
 ---
 
@@ -199,14 +170,7 @@ source of real money movement — the chain.
  Mistral ministral-8b            Telegram group chat (per room)
 ```
 
-**Why Lambda and not Firebase Functions:** Firestore and Auth are free on Spark;
-Cloud Functions requires the paid Blaze plan even at zero usage. So all backend
-logic runs on Lambda against the same Firestore. Result Cards are hand-built SVG
-rather than canvas — canvas libraries ship prebuilt native binaries keyed to an
-OS/arch, which is exactly what silently breaks when built on a Mac and run on
-Amazon Linux.
-
-**The trust boundary is enforced in database rules, not in app code.** A client can
+**The trust boundary is enforced in database rules, not app code.** A client can
 create *its own* call, only as `pending`, and only with a real `txHash` and
 `positionId` already attached. A client can **never** write status, payout, streak,
 XP, badges, or any leaderboard entry — those are written exclusively by the
@@ -215,22 +179,51 @@ outcomes come from the chain, not from a client claiming a win.
 
 ---
 
-## Features
+## Tech stack
 
-| | |
-|---|---|
-| **Rooms** | Public or private, tied to a live BTC/ETH market. Creator-only delete, which tells you whether the room still holds calls before you confirm |
-| **Shared feed** | Every call in the room, newest first, pending ones live |
-| **Streaks, XP, badges** | First Call, 3/5/10-streak, Room Champion — all server-verified from the on-chain result |
-| **Leaderboards** | Per-room and global, ranked by streak then XP, live via listeners |
-| **Explained results** | *"Closed Up — won 16.67 tUSDC (+11.67 profit)"*, with the winning leg derived from the verdict and the amount valued from the on-chain share count |
-| **Claim winnings** | The redemption step Event Contracts require, as a real button |
-| **Price chart** | A sparkline sized to the window, from the same oracle feed the AI line reads — so the chart and the AI take can't contradict each other |
-| **AI momentum read** | One plain sentence from Mistral `ministral-8b`, labelled *"AI take, not advice"*. The signal is real window outcomes; the model only does wording, and falls back to a deterministic template on any failure so a third party can't break the room card |
-| **Telegram** | Every settlement posts to the room's **own** group — linked with `/link CODE` — carrying the streak and the tx link, so results are verifiable rather than asserted |
-| **Telegram Mini App** | The same URL runs inside Telegram, so a result in the chat is one tap from the next call |
-| **Result Cards** | A shareable SVG generated the moment a call settles |
-| **Zero-setup onboarding** | A new wallet is granted testnet gas + collateral server-side, so a visitor places a real on-chain call in under a minute |
+| Layer | Choice | Why this one |
+|---|---|---|
+| **Chain** | Somnia Shannon testnet | where DreamDEX Event Contracts live |
+| **Markets** | `@dreamdex-bot-kit/ec-core` on `@somnia-chain/markets-sdk` | the Event Contract package specifically — *not* the spot/perp CLOB path the top-level quickstart points at |
+| **App** | Expo SDK 57 · React Native 0.86 · TypeScript | one codebase for web, native and the Telegram Mini App |
+| **Wallets** | RainbowKit + wagmi + viem, plus a server-funded demo wallet | RainbowKit for real wallets; the demo wallet exists because a browser-generated key holds 0 STT and so cannot send *any* transaction — including the faucet call that would fund it |
+| **Data** | Firestore + Anonymous Auth (free Spark tier) | live listeners give the shared room feed and leaderboards for free |
+| **Backend** | 6 AWS Lambdas — 1 EventBridge-scheduled, 5 Function URLs | Cloud Functions needs the paid Blaze plan even at zero usage |
+| **AI** | Mistral `ministral-8b` | one sentence of wording over a real signal, with a deterministic fallback |
+| **Notifications** | Telegram Bot API direct from the poller | no hosting to keep awake, so it survives a closed laptop |
+| **Images** | Hand-built SVG | canvas libraries ship OS/arch-specific native binaries — exactly what breaks when built on a Mac and run on Amazon Linux |
+| **Hosting** | Vercel (static export) | one URL serves web *and* the Mini App |
+| **Automation** | n8n (workflows exported) | the pre-lock nudge; see status at the bottom |
+| **Checks** | `tsx` unit tests · Puppeteer against the real build | 111 automated checks, no mocks |
+
+---
+
+## Built on DreamDEX Event Contracts
+
+- **`packages/ec-core`**, not the spot/perp CLOB path. Event Contracts have their
+  own package, their own preflight (`ec-doctor.ts`) and their own reference
+  strategies. The top-level Bot Kit quickstart points at `Pool.load` / `topOfBook`,
+  which is a different product.
+- **Venue** `0x679795a0195a1b76cdebb7c51d74e058aee92919b8c3389af86ef24535e8a28c`
+- **Windows are derived from live markets, never hard-coded.** The venue rotates
+  which cadences it runs — at one point only 4h and 1d were live. A fixed list
+  shows the user an empty screen through no fault of their own.
+- **Settlement reads the authoritative on-chain `MarketStatus`**, never the
+  seconds-lagging indexer. `judgeCall()` only ever reads `winningOutcome`.
+- **Each leg is priced from its own asks.** Deriving DOWN as `1 − yesBid` moves the
+  price the *wrong* way once slippage is added, so the order never crosses and
+  returns unfilled with no error at all.
+
+Cadences the venue actually runs, measured with our own tooling:
+
+```
+cadence   seconds  live markets  assets
+5m        300      4             ETH, BTC     ← most liquid, settles in a demo
+15m       900      2             BTC, ETH
+1h        3600     2             ETH, BTC
+4h        14400    2             BTC, ETH
+1d        86400    2             ETH, BTC
+```
 
 ---
 
@@ -247,10 +240,10 @@ sender to *hold* `gasLimit × maxFeePerGas` before it will even accept a
 transaction, regardless of what the call actually burns. The SDK defaults
 `gasLimit` to 10,000,000 and pins `maxFeePerGas` at 60 gwei:
 
-| | Required to be held, per write |
+| Configuration | Must be held, per write |
 |---|---|
-| SDK defaults (10,000,000 × 60 gwei) | **0.6 STT** |
-| Measured and pinned (2,000,000 × 12 gwei) | **0.024 STT** |
+| SDK defaults — 10,000,000 gas × 60 gwei | **0.6 STT** |
+| Measured and pinned — 2,000,000 gas × 12 gwei | **0.024 STT** |
 
 A **25× reduction** — and without it no ordinary wallet could place a call. A judge
 connecting their own MetaMask would have failed exactly like our demo wallet did.
@@ -272,15 +265,34 @@ that looks entirely plausible.
 
 ---
 
-## Engineering
+## Features
 
-| | |
+| Feature | What it does |
 |---|---|
-| **81** app unit tests | error mapping, call outcomes, quote/book maths, cadence labelling |
-| **20** backend unit tests | streak/XP/badge rules, Telegram MarkdownV2 escaping |
-| **10** browser checks | headless Chrome against the **real exported build, live chain and live database** — no mocks |
-| **8** Firestore indexes | one per real query shape |
-| **27** chain scripts | measurement and diagnostics, so every number in our docs is reproducible |
+| **Rooms** | Public or private, tied to a live BTC/ETH market. Creator-only delete, which tells you whether the room still holds calls before you confirm |
+| **Shared feed** | Every call in the room, newest first, pending ones live |
+| **Streaks, XP, badges** | First Call, 3/5/10-streak, Room Champion — all server-verified from the on-chain result |
+| **Leaderboards** | Per-room and global, ranked by streak then XP, live via listeners |
+| **Explained results** | *"Closed Up — won 16.67 tUSDC (+11.67 profit)"*, with the winning leg derived from the verdict and the amount valued from the on-chain share count |
+| **Claim winnings** | The redemption step Event Contracts require, as a real button |
+| **Price chart** | A sparkline sized to the window, from the same oracle feed the AI line reads — so the chart and the AI take can't contradict each other |
+| **AI momentum read** | One plain sentence from Mistral `ministral-8b`, labelled *"AI take, not advice"*. The signal is real window outcomes; the model only does wording, and falls back to a deterministic template on any failure so a third party can't break the room card |
+| **Telegram** | Every settlement posts to the room's **own** group — linked with `/link CODE` — carrying the streak and the tx link, so results are verifiable rather than asserted |
+| **Telegram Mini App** | The same URL runs inside Telegram, so a result in the chat is one tap from the next call |
+| **Result Cards** | A shareable SVG generated the moment a call settles |
+| **Zero-setup onboarding** | A new wallet is granted testnet gas + collateral server-side, so a visitor places a real on-chain call in under a minute |
+
+---
+
+## Testing
+
+| What | Count | Covers |
+|---|---|---|
+| App unit tests | **81** | error mapping, call outcomes, quote/book maths, cadence labelling |
+| Backend unit tests | **20** | streak/XP/badge rules, Telegram MarkdownV2 escaping |
+| Browser checks | **10** | headless Chrome against the real exported build, live chain and live database |
+| Firestore indexes | **8** | one per real query shape |
+| Chain scripts | **27** | measurement and diagnostics, so every number in our docs is reproducible |
 
 The browser checks exist because most of this app's real failures only appear in a
 browser against live data: a react-native-web layout collapsing to `height: 0` with
