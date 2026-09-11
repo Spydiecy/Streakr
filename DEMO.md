@@ -186,20 +186,22 @@ Either from history or by calling the unlikely side deliberately.
 product rather than a happy path, and the capped-loss story is genuinely your
 strongest risk argument.
 
-### 2:55 — Close on what you learned
+### 2:55 — Close on the product
 
-> "The hardest part wasn't the app. Somnia's SDK signs every transaction with a
-> ten-million gas limit at a fixed sixty gwei, which means a node demands 0.6 STT
-> held before it will even accept it — so no ordinary wallet could place a call,
-> and the error said 'missing or invalid parameters'. We measured it, fixed it,
-> and wrote it up."
+Back on the room screen, with a live market and the leaderboard visible.
 
-> "That's in FEEDBACK.md — seventeen findings, every number reproducible from a
-> script in the repo."
+> "So that's Streakr. Make a room, get your friends in, and call the market
+> together. Every call is a real trade on DreamDEX, every result comes straight
+> from the chain, and your loss is always capped at your stake."
 
-**Why close here:** most submissions end on features. Ending on evidence that you
-understood the platform deeply enough to find its sharp edges is far more
-memorable, and it's true.
+> "It's live right now on Somnia testnet — in the browser, or inside Telegram.
+> Links are below. Go take a streak off someone."
+
+**Why close here:** this is a product demo, so it ends on the product and a reason
+to open it. The engineering story — the gas ceiling, the settlement traps, the
+seventeen SDK findings — belongs in the README and `FEEDBACK.md`, where a judge
+looking for depth will find it. Don't spend your last fifteen seconds on your own
+debugging; spend it making someone want to play.
 
 ---
 
