@@ -44,18 +44,41 @@ for (const file of files) {
     }
   });
 
-  const count = (re) => (raw.match(re) || []).length;
-  const open = count(/<details>/g);
-  const close = count(/<\/details>/g);
+  // Tags inside a fenced block are text, not markup — this README's own repo tree
+  // contains the literal string "<details>" while describing this script, which an
+  // unfiltered count reported as an unclosed tag.
+  const outsideFences = [];
+  {
+    let inFence = false;
+    lines.forEach((l, i) => {
+      if (/^```/.test(l)) { inFence = !inFence; return; }
+      if (!inFence) outsideFences.push({ line: i + 1, text: l });
+    });
+  }
+
+  const open = outsideFences.filter((l) => /<details>/.test(l.text)).length;
+  const close = outsideFences.filter((l) => /<\/details>/.test(l.text)).length;
+
+  // A count mismatch alone sends you scrolling. Track the nesting and name the
+  // line of the tag that never closed.
+  const openStack = [];
+  const strayClose = [];
+  for (const { line, text } of outsideFences) {
+    if (/<details>/.test(text)) openStack.push(line);
+    if (/<\/details>/.test(text)) {
+      if (openStack.length) openStack.pop();
+      else strayClose.push(line);
+    }
+  }
 
   // GitHub only parses markdown inside <details> when a blank line follows
   // </summary>. Without it, a fenced diagram renders as literal text.
   const noBlank = [];
-  lines.forEach((l, i) => {
-    if (!/<\/summary>/.test(l)) return;
-    const next = lines[i + 1];
-    if (next !== undefined && next.trim() !== "") noBlank.push(`line ${i + 2}`);
-  });
+  for (const { line, text } of outsideFences) {
+    if (!/<\/summary>/.test(text)) continue;
+    const next = lines[line]; // lines is 0-indexed, so this is the following line
+    if (next !== undefined && next.trim() !== "") noBlank.push(`line ${line + 1}`);
+  }
 
   const langs = Object.entries(byLang).map(([k, v]) => `${k}:${v}`).join(" ");
   console.log(`\n${file}`);
@@ -66,7 +89,17 @@ for (const file of files) {
 
   fence === null ? ok("every fence closed") : fail(`unterminated "${fence}" fence`);
   suspect.length === 0 ? ok("no nested fence openings") : fail(`suspect fences\n       ${suspect.join("\n       ")}`);
-  open === close ? ok(`<details> balanced (${open})`) : fail(`<details> ${open} vs </details> ${close}`);
+  if (open === close && openStack.length === 0 && strayClose.length === 0) {
+    ok(`<details> balanced (${open})`);
+  } else {
+    const detail = [
+      openStack.length ? `unclosed <details> opened at line ${openStack.join(", ")}` : null,
+      strayClose.length ? `</details> with no opener at line ${strayClose.join(", ")}` : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+    fail(`<details> ${open} vs </details> ${close}${detail ? ` — ${detail}` : ""}`);
+  }
   noBlank.length === 0
     ? ok("blank line after every </summary>")
     : fail(`markdown inside <details> will render literally at ${noBlank.join(", ")}`);

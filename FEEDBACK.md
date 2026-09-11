@@ -151,9 +151,29 @@ real cause.
 Note also that `interval` labels `86400` as `"24h"`, so a consumer using `"1d"`
 in its own vocabulary will render a mismatch against its own chips.
 
+There's a worse version of this trap, which cost us a whole window. Because a
+consumer has to build its own seconds→label map, that map doubles as an
+**allowlist** — and a cadence missing from it doesn't error, it maps to `null` and
+gets filtered out. We shipped for days without 5m markets for exactly this reason,
+while the venue was running *more* 5m series than anything else:
+
+```
+cadence   seconds  markets  assets     our app showed it as
+5m        300      4        ETH,BTC    *** DROPPED — no label ***
+15m       900      2        BTC,ETH    15m
+1h        3600     2        ETH,BTC    1h
+```
+
+Nothing surfaced this. The markets were live, quoted on both legs, and simply
+invisible — and 5m is the *most* demo-friendly cadence, since it settles inside a
+recording. We only found it by writing a script that lists live cadences with our
+own allowlist removed (`chain-integration/scripts/list-cadences.ts`).
+
 **Suggested fix:** have the SDK expose a `cadence` field already snapped to its
 `CADENCE_LADDER_SEC` rung. It does this internally for `interval`; exposing the
-snapped seconds too would remove the trap entirely.
+snapped seconds too would remove the trap entirely — and with it the need for
+consumers to keep a hand-written rung list that silently hides whatever it
+doesn't know about.
 
 ---
 

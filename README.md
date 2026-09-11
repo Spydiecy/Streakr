@@ -451,8 +451,11 @@ Streakr/
 │       ├── scripts/
 │       │   ├── set-env.mjs          safe Lambda env merge — use this, not raw CLI
 │       │   ├── inspect-pending.mjs  why is a call still pending?
+│       │   ├── inspect-nudge.mjs    why is the pre-lock nudge returning nothing?
 │       │   ├── recent-calls.mjs     latest calls with status + payout
-│       │   └── purge-test-rooms.mjs delete rooms by name, plus their leaderboard
+│       │   ├── verify-telegram-5m.mjs  build a real notification and send it
+│       │   ├── purge-test-rooms.mjs delete rooms by name, plus their leaderboard
+│       │   └── purge-probe-data.mjs remove all test-run leftovers (dry run first)
 │       └── DEPLOY.md              AWS CLI deploy walkthrough, per function
 │
 ├── app/                  Expo (React Native) — the actual product
@@ -463,6 +466,7 @@ Streakr/
 │   │   │   ├── errors.ts            chain/SDK/Firestore errors -> human sentences
 │   │   │   ├── quote.ts             leaf module: per-leg pricing + book quality
 │   │   │   ├── windows.ts           leaf module: cadence -> window label (30 tests)
+│   │   │   ├── telegramMiniApp.ts   leaf module: am I in Telegram's WebView?
 │   │   │   ├── callOutcome.ts       leaf module: what a settled call actually did
 │   │   │   ├── priceFeed.ts         oracle candles for the sparkline
 │   │   │   ├── firestoreApi.ts      every Firestore read/write + live listeners
@@ -479,9 +483,15 @@ Streakr/
 │   │                      Countdown, PriceChart, ui/ScrollBox (capped lists)
 │   │                      + design-system primitives
 │   ├── e2e/               headless-Chrome checks against the real build + chain
-│   │   └── tools/         bal.mjs (balances + affordable writes), gas.mjs
-│   │                      (treasury top-up), shot.mjs / shot-noname.mjs (screenshots)
-│   └── scripts/           icon generation, build gates (asset relocation, env verify)
+│   │   └── tools/         preflight.mjs (can we still onboard?), bal.mjs, gas.mjs
+│   │                      + sweep.mjs (treasury in/out), probe-window.mjs,
+│   │                      probe-http.mjs, shot.mjs / shot-noname.mjs
+│   └── scripts/           icon generation, build gates (asset relocation, env verify,
+│                          Telegram Mini App script injection)
+│
+├── scripts/              repo-wide doc checks
+│   ├── check-docs.mjs           fence + <details> structure (a bad fence eats the file)
+│   └── check-docs-coverage.mjs  every script is mentioned somewhere
 │
 └── n8n-workflows/        Telegram settlement notify + pre-lock nudge (JSON exports)
 ```
@@ -914,6 +924,9 @@ cp .env.example .env    # Firebase config + the 3 Lambda Function URLs
 npm run web              # fastest for a demo
 
 npm run typecheck        # tsc --noEmit
+# from the repo root:
+#   node scripts/check-docs.mjs           docs structure
+#   node scripts/check-docs-coverage.mjs  no script left undocumented
 npm run test             # 81 unit tests: error mapping, call outcomes, quote/book
                          # maths, cadence labelling
 npm run build:web        # clean export + asset relocation + build gates
@@ -1247,11 +1260,20 @@ production instead.
 `e2e/tools/` holds helpers rather than checks:
 
 ```bash
+node e2e/tools/preflight.mjs                  # can this still onboard anyone?
 node e2e/tools/bal.mjs <address>…             # STT, affordable writes, tUSDC
 node e2e/tools/gas.mjs <address> [amount]     # treasury top-up (harness only)
+node e2e/tools/sweep.mjs <privateKey>…        # return probe funds to the treasury
+node e2e/tools/probe-window.mjs <url> [5m]    # is a window really tradable?
+node e2e/tools/probe-http.mjs <url> [load|signin|room]   # every non-2xx, with its URL
 node e2e/tools/shot.mjs <url> <out.png> [profile|room] [pk]
 node e2e/tools/shot-noname.mjs <url> <out.png>
 ```
+
+`probe-http.mjs` earns its place: the checks report a bare
+`Failed to load resource: 503` from the console, which names no URL. This drives
+sign-in and room creation — nothing 503s at page load — and prints the address
+behind it. That's how the drained-treasury faucet outage was found.
 
 `bal.mjs` reports **affordable writes** alongside the balance, because that's the
 number that predicts whether a call can be placed — at a 2,000,000 gas ceiling and
@@ -1267,12 +1289,33 @@ For when something is wrong in live data rather than in the UI:
 cd backend/lambda
 node scripts/inspect-pending.mjs [limit]   # why is a call still pending?
 node scripts/recent-calls.mjs [limit]      # latest calls, status + payout
-node scripts/purge-test-rooms.mjs "Name"   # delete rooms created by test runs
+npx tsx scripts/inspect-nudge.mjs [secs]   # why is the pre-lock nudge empty?
+node scripts/purge-test-rooms.mjs "Name"   # delete rooms by exact name
+node scripts/purge-probe-data.mjs          # DRY RUN: all test-run leftovers
+node scripts/purge-probe-data.mjs --yes    # …and actually remove them
+
+TELEGRAM_BOT_TOKEN=… TELEGRAM_CHAT_ID=… \
+  npx tsx scripts/verify-telegram-5m.mjs --send   # a real settlement notification
 
 cd chain-integration
+npx tsx scripts/list-cadences.ts                       # cadences the venue really runs
 npx tsx scripts/find-claimable.ts                      # unredeemed wins for the signer
 PK=0x… npx tsx scripts/redeem-position.ts [marketId]   # redeem with a specific key
 ```
+
+`purge-probe-data.mjs` exists because each browser check signs in as a fresh
+anonymous user and often creates a room, so a day of runs leaves dozens of
+one-member rooms and probe accounts in the public list and on the global
+leaderboard. It's dry-run by default and deliberately conservative: probe names
+come from grepping the actual `signIn()` calls in `app/e2e` rather than from what
+looks automated, a `0x…` display name is **never** treated as a probe (that's a
+real visitor who skipped the name field), and a room is never deleted if it has a
+Telegram chat linked or holds calls from a real account.
+
+`verify-telegram-5m.mjs` builds a settlement message from a real settled call with
+the production formatter and then **sends** it. Printing it proves nothing: one
+unescaped MarkdownV2 character makes Telegram reject the entire send, so the
+notification silently never arrives. Telegram's own accept/reject is the authority.
 
 `inspect-pending.mjs` separates the two failures that look identical from the UI:
 a poller not picking a call up, versus a market that simply hasn't resolved yet. It
